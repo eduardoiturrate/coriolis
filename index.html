@@ -86,6 +86,15 @@
   <div class="tabs"><button id="tabPlay" class="on">Playground</button><button id="tabEarth">On Earth</button></div>
 
   <div id="playBox">
+    <div class="chips" style="margin-bottom:6px"><button id="kindRound" class="on">Roundabout</button><button id="kindStation">Spinning space station</button></div>
+    <div id="stationBox" hidden>
+      <div class="row">
+        <label>Size of the station (across) <b id="ringV"></b></label>
+        <input id="ring" type="range" min="1.3" max="3" step="0.05" value="1.9" />
+        <div class="sub" style="margin:4px 0 0">It always spins just fast enough to give 1 g at the floor.</div>
+      </div>
+    </div>
+    <div id="roundBox">
     <div class="row">
       <label>Spin of the roundabout <b id="rpmV"></b></label>
       <input id="rpm" type="range" min="0" max="30" step="1" value="12" />
@@ -99,6 +108,7 @@
       <div class="chips"><button id="fromEdge" class="on">The edge, to a friend opposite</button><button id="fromCenter">The center, to a friend at the edge</button></div>
     </div>
     <label class="check"><input id="showSum" type="checkbox" checked /> Show the arrows at the moment of the throw</label>
+    </div>
   </div>
 
   <div id="earthBox" hidden>
@@ -108,9 +118,17 @@
         <button data-preset="cannon" class="on">Cannon shell</button>
         <button data-preset="foucault">Foucault pendulum</button>
         <button data-preset="storm">Storm winds</button>
+        <button data-preset="trades">Trade winds</button>
+        <button data-preset="loops">Ocean loops</button>
+        <button data-preset="eotvos">East or west: lighter or heavier</button>
         <button data-preset="sink">Sink drain</button>
         <button data-preset="tower">Dropped from a tower</button>
       </div>
+    </div>
+    <label class="check" id="aloftRow" hidden><input id="aloft" type="checkbox" /> High up, where the air hardly rubs on the ground</label>
+    <div class="row" id="vehicleRow" hidden>
+      <label>Moving at <b id="vehicleV"></b></label>
+      <div class="chips"><button data-vehicle="10">A ship, 10 m/s</button><button data-vehicle="30">A car, 30 m/s</button><button data-vehicle="250" class="on">A jet, 250 m/s</button></div>
     </div>
     <div class="row">
       <label>Latitude <b id="latV"></b></label>
@@ -192,6 +210,8 @@ const state = {
   mode: 'play',
   preset: 'cannon',
   fromEdge: true,
+  playKind: 'round', // the roundabout, or the spinning space station
+  vehicle: 250, // speed (m/s) for East or west
   running: false,
   paused: false,
   t: 0, // simulated seconds since the start
@@ -214,6 +234,17 @@ function turntable(opts) {
 
 /** The scene for the present settings. */
 function makeScene() {
+  if (state.mode === 'play' && state.playKind === 'station') {
+    // A ring station, spinning for 1 g at the floor (w² R = g). You stand on the floor (the
+    // outer rim; "down" is outward) and let go of a ball at the height of your hand.
+    const R = 10 ** Number($('ring').value) / 2;
+    const w = Math.sqrt(9.81 / R);
+    const h = Math.min(1.5, R * 0.2);
+    return turntable({
+      R, w, wShown: w, p0: { x: 0, y: -(R - h) }, target: { x: 0, y: -R }, vRel: { x: 0, y: 0 }, aim: { x: 0, y: -1 }, end: 'edge',
+      timeScale: Number($('slow').value), units: 'm', diskLabel: 'station', tMax: 30, station: true, h,
+    });
+  }
   if (state.mode === 'play') {
     const rpm = Number($('rpm').value);
     const v = Number($('speed').value);
@@ -247,7 +278,10 @@ function makeScene() {
     });
   }
   if (state.preset === 'foucault') return { kind: 'foucault', lat, wReal, timeScale: 3600 * Number($('slow').value) * 2 };
-  if (state.preset === 'storm') return { kind: 'storm', lat, timeScale: 6 * 3600 * Number($('slow').value) };
+  if (state.preset === 'storm') return { kind: 'storm', lat, aloft: $('aloft').checked, timeScale: 6 * 3600 * Number($('slow').value) };
+  if (state.preset === 'trades') return { kind: 'trades', timeScale: 2 * 86400 * Number($('slow').value) };
+  if (state.preset === 'loops') return { kind: 'loops', lat, timeScale: 12 * 3600 * Number($('slow').value) };
+  if (state.preset === 'eotvos') return { kind: 'eotvos', lat, v: state.vehicle, timeScale: 1 };
   return { kind: 'tower', lat, h: 100, boost: boost * 100 };
 }
 
@@ -298,13 +332,13 @@ function fit(canvas) {
 }
 
 /** A drawing frame: a square area in the middle of the canvas, with coordinates in meters, y up. */
-function frame(c, R) {
+function frame(c, R, center = { x: 0, y: 0 }) {
   const size = Math.min(c.w, c.h) * 0.4;
   const k = size / R;
   return {
     ...c,
     k,
-    P: (p) => ({ x: c.w / 2 + p.x * k, y: c.h / 2 - p.y * k }),
+    P: (p) => ({ x: c.w / 2 + (p.x - center.x) * k, y: c.h / 2 - (p.y - center.y) * k }),
     px: (n) => n * c.dpr,
   };
 }
@@ -429,7 +463,7 @@ function drawTurntable(t) {
   dot(L, rot(sc.target, angle), C.friend, 7);
   dot(L, rot(sc.p0, angle), C.you, 7);
   if (started) dot(L, path[path.length - 1], '#ffffff', 5);
-  if ($('showSum').checked && state.mode === 'play' && tt < 1.6 * sc.timeScale + 0.2) {
+  if ($('showSum').checked && state.mode === 'play' && !sc.station && tt < 1.6 * sc.timeScale + 0.2) {
     // At the moment of the throw: the throw, the hand's own motion, and their sum.
     const own = { x: -w * sc.p0.y, y: w * sc.p0.x };
     const k = 0.25;
@@ -437,19 +471,29 @@ function drawTurntable(t) {
     if (len(own) > 0.01) arrow(L, sc.p0, scale(own, k), C.you, 3, 'your own motion');
     if (len(own) > 0.01) arrow(L, sc.p0, scale(add(sc.vRel, own), k), C.ball, 3, 'the ball');
   }
-  note(L, ground ? 'Seen from space: the ground turns under the ball' : 'Seen from a camera above, not turning');
+  if (sc.station) {
+    // Your hand's own motion at the moment you let go: the only motion the ball has.
+    if (tt < 1.5 * sc.timeScale + 0.3) arrow(L, sc.p0, scale({ x: -w * sc.p0.y, y: w * sc.p0.x }, 0.12 * sc.R / Math.max(1, w * sc.R)), C.you, 3, 'your hand\u2019s motion');
+  }
+  note(L, sc.station ? 'Seen from outside, not turning: the ball flies straight' : ground ? 'Seen from space: the ground turns under the ball' : 'Seen from a camera above, not turning');
   spinMark(L, w);
 
-  // Right: the camera turns with the disc. The same flight curves.
-  const Rv = frame(fit(views.right), sc.R);
+  // Right: the camera turns with the disc. The same flight curves. In the station: a close-up
+  // around you, as the drop is small next to the whole station.
+  const Rv = sc.station ? frame(fit(views.right), 1.4 * sc.h, { x: 0, y: -sc.R + 0.6 * sc.h }) : frame(fit(views.right), sc.R);
   Rv.ctx.clearRect(0, 0, Rv.w, Rv.h);
   disc(Rv, 0, label, ground);
+  if (sc.station) {
+    // You, standing on the floor: from the floor up to the hand that lets go.
+    line(Rv, [{ x: -0.12 * sc.h, y: -sc.R }, { x: -0.12 * sc.h, y: sc.p0.y + 0.15 * sc.h }], 'rgba(155,231,166,0.8)', 7);
+    line(Rv, [{ x: -0.12 * sc.h, y: sc.p0.y + 0.05 * sc.h }, sc.p0], 'rgba(155,231,166,0.8)', 4);
+  }
   line(Rv, [sc.p0, add(sc.p0, scale(sc.aim, 2 * sc.R))], C.aim, 1.5, [6, 6]);
   if (started) line(Rv, ink, C.ink, 3.5);
   dot(Rv, sc.target, C.friend, 7);
   dot(Rv, sc.p0, C.you, 7);
   if (started) dot(Rv, ink[ink.length - 1], '#ffffff', 5);
-  note(Rv, ground ? 'Seen from the ground, which turns with Earth' : 'Seen by you, turning with the roundabout');
+  note(Rv, sc.station ? 'Seen by you, inside: it falls, and lands behind' : ground ? 'Seen from the ground, which turns with Earth' : 'Seen by you, turning with the roundabout');
   return T;
 }
 
@@ -497,7 +541,7 @@ function drawFoucault(t) {
  * slowed by friction with the ground. Computed on the turning ground (where the air is measured),
  * north and south of the equator at the same distance.
  */
-function stormPaths(lat, tEnd) {
+function stormPaths(lat, tEnd, aloft) {
   const out = [];
   for (const sign of [1, -1]) {
     const f = 2 * OMEGA * Math.sin(Math.abs(lat)) * sign;
@@ -505,7 +549,9 @@ function stormPaths(lat, tEnd) {
     for (let k = 0; k < 12; k++) {
       const a = (k * Math.PI) / 6;
       let p = { x: 600e3 * Math.cos(a), y: 600e3 * Math.sin(a) };
-      let v = { x: 0, y: 0 };
+      // High up the air already blows in balance: the pressure pushes in, the turning pushes out.
+      // That needs a speed a / f along the circle: around the low, not into it.
+      let v = aloft && Math.abs(f) > 1e-7 ? scale({ x: -Math.sin(a), y: Math.cos(a) }, 0.0016 / f) : { x: 0, y: 0 };
       const pts = [p];
       const dt = 300;
       for (let t = 0; t < tEnd; t += dt) {
@@ -515,7 +561,7 @@ function stormPaths(lat, tEnd) {
         const cor = { x: f * v.y, y: -f * v.x }; // turns the motion: to the right in the north
         // Friction with the ground: near the ground it is about as strong as the turning, so the
         // air crosses toward the low at a slant and spirals in, instead of circling around it.
-        const drag = scale(v, -1.2e-4);
+        const drag = scale(v, aloft ? 0 : -1.2e-4);
         v = add(v, scale(add(add(push, cor), drag), dt));
         p = add(p, scale(v, dt));
         pts.push(p);
@@ -532,8 +578,9 @@ function drawStorm(t) {
   const R = 700e3;
   scene.R = R;
   const tEnd = Math.min(t, 3 * 86400);
-  const [north, south] = stormPaths(sc.lat, tEnd);
-  for (const [canvas, paths, title, sign] of [[views.left, north, 'North of the equator: the storm turns counterclockwise', 1], [views.right, south, 'South of the equator: the storm turns clockwise', -1]]) {
+  const [north, south] = stormPaths(sc.lat, tEnd, sc.aloft);
+  const what = sc.aloft ? 'the wind blows around the low' : 'the storm turns';
+  for (const [canvas, paths, title, sign] of [[views.left, north, `North: ${what} counterclockwise`, 1], [views.right, south, `South: ${what} clockwise`, -1]]) {
     const F = frame(fit(canvas), R);
     F.ctx.clearRect(0, 0, F.w, F.h);
     disc(F, 0, sign > 0 ? 'N' : 'N', true);
@@ -548,6 +595,185 @@ function drawStorm(t) {
     spinMark(F, sign * Math.sin(Math.abs(sc.lat)));
   }
   return tEnd >= 3 * 86400;
+}
+
+// ---------- Trade winds ----------
+
+/**
+ * Air near the ground between 30° and the equator: pressure pushes it toward the equator, the
+ * ground slows it, and on the turning Earth it turns toward the west. A flat map: x east, y north
+ * (m), with the latitude from y. With `spin` false, Earth does not turn: the air goes straight.
+ */
+function tradePaths(tEnd, spin) {
+  const KM_PER_DEG = 111.2e3;
+  const paths = [];
+  for (const side of [1, -1]) {
+    for (let k = 0; k < 7; k++) {
+      let p = { x: -1500e3 + k * 750e3, y: side * 30 * KM_PER_DEG };
+      let v = { x: 0, y: 0 };
+      const pts = [p];
+      const dt = 1800;
+      for (let t = 0; t < tEnd; t += dt) {
+        const lat = p.y / KM_PER_DEG;
+        if (Math.abs(lat) < 1.5) break;
+        const f = spin ? 2 * OMEGA * Math.sin(lat * DEG) : 0;
+        const push = { x: 0, y: -Math.sign(lat) * 3e-4 * Math.min(1, Math.abs(lat) / 8) };
+        const cor = { x: f * v.y, y: -f * v.x };
+        const drag = scale(v, -4e-5);
+        v = add(v, scale(add(add(push, cor), drag), dt));
+        p = add(p, scale(v, dt));
+        pts.push(p);
+      }
+      paths.push(pts);
+    }
+  }
+  return paths;
+}
+
+function drawTrades(t) {
+  const R = 3900e3;
+  scene.R = R;
+  const tEnd = Math.min(t, 16 * 86400);
+  const KM_PER_DEG = 111.2e3;
+  for (const [canvas, spin, title] of [[views.left, false, 'If Earth did not turn: straight to the equator'], [views.right, true, 'On the turning Earth: the air turns west']]) {
+    const F = frame(fit(canvas), R);
+    F.ctx.clearRect(0, 0, F.w, F.h);
+    // Latitude lines, with labels.
+    for (const lat of [-30, -15, 0, 15, 30]) {
+      const y = lat * KM_PER_DEG;
+      line(F, [{ x: -R, y }, { x: R, y }], lat === 0 ? 'rgba(255,213,79,0.55)' : 'rgba(255,255,255,0.14)', lat === 0 ? 2 : 1, lat === 0 ? null : [4, 6]);
+      const q = F.P({ x: -R, y });
+      F.ctx.fillStyle = 'rgba(255,255,255,0.6)';
+      F.ctx.font = `600 ${F.px(11)}px system-ui`;
+      F.ctx.textAlign = 'left'; F.ctx.textBaseline = 'bottom';
+      F.ctx.fillText(lat === 0 ? 'equator' : `${Math.abs(lat)}° ${lat > 0 ? 'N' : 'S'}`, q.x + F.px(4), q.y - F.px(2));
+    }
+    const q = F.P({ x: R, y: 0 });
+    F.ctx.textAlign = 'right';
+    F.ctx.fillText('east \u2192', q.x - F.px(4), F.P({ x: 0, y: -R }).y - F.px(4));
+    for (const pts of tradePaths(tEnd, spin)) {
+      line(F, pts, C.ball, 2.5);
+      if (pts.length > 2) {
+        const a = pts[pts.length - 2], b = pts[pts.length - 1];
+        const d = { x: b.x - a.x, y: b.y - a.y }, l = len(d);
+        if (l > 0) arrow(F, b, scale(d, 90e3 / l), C.ball, 2.5);
+      }
+    }
+    note(F, title);
+  }
+  return tEnd >= 16 * 86400;
+}
+
+// ---------- Ocean loops ----------
+
+/**
+ * Water set moving east at 0.3 m/s by a storm, after the wind stops: nothing pushes it any more,
+ * so on the turning ground it runs in circles (clockwise in the north). A slow steady current of
+ * 4 cm/s carries the circles along, as in the tracks of drifting buoys.
+ */
+function loopPath(lat, tEnd) {
+  const f = 2 * OMEGA * Math.sin(lat);
+  const U = 0.04;
+  let u = { x: 0.3, y: 0 };
+  let p = { x: -6000, y: 0 };
+  const pts = [p];
+  const dt = 120;
+  for (let t = 0; t < tEnd; t += dt) {
+    u = rot(u, -f * dt); // the turning ground turns the motion: clockwise in the north
+    p = add(p, scale(add(u, { x: U, y: 0 }), dt));
+    pts.push(p);
+  }
+  return pts;
+}
+
+function drawLoops(t) {
+  const sc = scene;
+  const R = 8000;
+  scene.R = R;
+  const tEnd = Math.min(t, 4 * 86400);
+  const lat = Math.abs(sc.lat);
+  for (const [canvas, l, title] of [[views.left, lat, 'North: the water runs in clockwise loops'], [views.right, -lat, 'South: the loops turn counterclockwise']]) {
+    const F = frame(fit(canvas), R);
+    F.ctx.clearRect(0, 0, F.w, F.h);
+    F.ctx.fillStyle = '#0a2236';
+    F.ctx.fillRect(0, 0, F.w, F.h);
+    const pts = loopPath(l, tEnd);
+    line(F, [{ x: -6000, y: 0 }, { x: 7000, y: 0 }], 'rgba(201,211,223,0.3)', 1.2, [5, 6]);
+    line(F, pts, C.ball, 2.5);
+    dot(F, pts[0], C.you, 6);
+    dot(F, pts[pts.length - 1], '#ffffff', 5);
+    note(F, title);
+    if (lat < 1 * DEG) note(F, 'At the equator: no loops, the water goes straight on', 38, C.warn);
+    // A 2 km scale bar.
+    const a = F.P({ x: -7000, y: -6500 }), b = F.P({ x: -5000, y: -6500 });
+    F.ctx.strokeStyle = 'rgba(255,255,255,0.6)'; F.ctx.lineWidth = F.px(2);
+    F.ctx.beginPath(); F.ctx.moveTo(a.x, a.y); F.ctx.lineTo(b.x, b.y); F.ctx.stroke();
+    F.ctx.fillStyle = 'rgba(255,255,255,0.7)'; F.ctx.font = `600 ${F.px(11)}px system-ui`; F.ctx.textAlign = 'center'; F.ctx.textBaseline = 'bottom';
+    F.ctx.fillText('2 km', (a.x + b.x) / 2, a.y - F.px(3));
+  }
+  return tEnd >= 4 * 86400;
+}
+
+// ---------- East or west: lighter or heavier ----------
+
+/** Weight on a scale of a 100 kg person moving east or west at v (m/s), at latitude lat. */
+function eotvos(lat, v) {
+  const g = 9.81, R = 6.371e6;
+  const turn = 2 * OMEGA * v * Math.cos(lat); // from Earth's spin: lighter going east, heavier going west
+  const curve = (v * v) / R; // from going around the curve of Earth: lighter both ways
+  return { east: 100 * (1 - (turn + curve) / g), west: 100 * (1 + (turn - curve) / g), turn, curve };
+}
+
+function drawEotvos(now) {
+  const sc = scene;
+  const R = 1;
+  scene.R = R;
+  const lat = sc.lat;
+  const ground = 465.1 * Math.cos(lat);
+  // Left: seen from above the north pole. Earth turns counterclockwise; the circle of this
+  // latitude, the ground's speed around the axis, and the two vehicles.
+  const L = frame(fit(views.left), R);
+  L.ctx.clearRect(0, 0, L.w, L.h);
+  const spin = (now / 1000) * 0.25;
+  disc(L, spin, null, true);
+  const r = Math.max(0.15, Math.cos(lat)) * 0.95;
+  const o = L.P({ x: 0, y: 0 });
+  L.ctx.strokeStyle = 'rgba(255,255,255,0.35)'; L.ctx.lineWidth = L.px(1.5); L.ctx.setLineDash([L.px(5), L.px(5)]);
+  L.ctx.beginPath(); L.ctx.arc(o.x, o.y, r * L.k, 0, 2 * Math.PI); L.ctx.stroke(); L.ctx.setLineDash([]);
+  const k = 0.45 / 750; // arrow length per m/s
+  const at = (a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
+  const tangent = (a) => ({ x: -Math.sin(a), y: Math.cos(a) });
+  const aE = spin + 0.5, aW = spin + 0.5 + Math.PI;
+  arrow(L, at(aE), scale(tangent(aE), (ground + sc.v) * k), C.ball, 3.5, 'east');
+  arrow(L, at(aW), scale(tangent(aW), (ground - sc.v) * k), C.friend, 3.5, 'west');
+  dot(L, at(aE), C.ball, 6);
+  dot(L, at(aW), C.friend, 6);
+  note(L, 'Seen from above the north pole: Earth turns, carrying the ground east');
+  note(L, `Around Earth's axis: the ground ${Math.round(ground)} m/s, going east ${Math.round(ground + sc.v)}, going west ${Math.round(ground - sc.v)}`, 36, C.muted);
+  spinMark(L, 1);
+  // Right: two scales.
+  const Rv = fit(views.right);
+  const ctx = Rv.ctx;
+  ctx.clearRect(0, 0, Rv.w, Rv.h);
+  const e = eotvos(lat, sc.v);
+  const px = (n) => n * Rv.dpr;
+  const drawScale = (cx, label, kg, color) => {
+    const w = Math.min(Rv.w * 0.36, px(220)), h = w * 0.62, top = Rv.h * 0.38;
+    ctx.fillStyle = '#1b2638'; ctx.strokeStyle = color; ctx.lineWidth = px(2.5);
+    ctx.beginPath(); ctx.roundRect(cx - w / 2, top, w, h, px(14)); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#070c16';
+    ctx.beginPath(); ctx.roundRect(cx - w * 0.38, top + h * 0.2, w * 0.76, h * 0.42, px(8)); ctx.fill();
+    ctx.fillStyle = color; ctx.font = `800 ${Math.round(w * 0.14)}px ui-monospace, monospace`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(`${kg.toFixed(2)} kg`, cx, top + h * 0.41);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.font = `700 ${px(14)}px system-ui`;
+    ctx.fillText(label, cx, top - px(18));
+    ctx.fillStyle = C.muted; ctx.font = `600 ${px(12)}px system-ui`;
+    ctx.fillText(`${kg >= 100 ? '+' : '\u2212'}${Math.abs((kg - 100) * 1000).toFixed(0)} g`, cx, top + h * 0.82);
+  };
+  drawScale(Rv.w * 0.27, 'Going east', e.east, C.ball);
+  drawScale(Rv.w * 0.73, 'Going west', e.west, C.friend);
+  ctx.fillStyle = 'rgba(255,255,255,0.75)'; ctx.font = `600 ${px(12)}px system-ui`; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+  ctx.fillText('A person who weighs 100 kg at rest, on a scale in the vehicle', Rv.w / 2, px(18));
 }
 
 // ---------- The tower ----------
@@ -602,7 +828,16 @@ function explain() {
     const m = miss(sc, sc.w);
     const shown = miss(sc, sc.wShown);
     const side = m.side >= 0 ? 'right' : 'left';
-    if (state.mode === 'play') {
+    if (sc.station) {
+      const rpm = (sc.w * 60) / (2 * Math.PI);
+      const behind = m.side >= 0;
+      box.innerHTML = `<div class="nums">
+        <div class="num"><small>the ball lands, from the spot below your hand</small><b>${dist(Math.abs(m.side))}</b> ${behind ? 'behind you' : 'ahead'}</div>
+        <div class="num"><small>the station spins</small><b>${rpm.toFixed(1)}</b> turns a minute</div>
+        <div class="num"><small>fall time</small><b>${m.T.toFixed(2)} s</b></div></div>
+        <p>In a spinning station "down" is outward: the floor pushes you around the circle, and that feels like weight. Nothing pulls on the ball once you let go. Seen from outside (left), it flies <b>straight</b>, at the speed your hand had.</p>
+        <p>Your hand is nearer the center than the floor, so it moves a little slower than the floor. The floor runs ahead while the ball flies, and the ball lands <b>behind</b> the spot below your hand (right). In a small station the drift is large, and turning your head makes people dizzy. That is why designers want stations hundreds of meters across.</p>`;
+    } else if (state.mode === 'play') {
       const own = Math.abs(sc.w * len(sc.p0));
       box.innerHTML = `<div class="nums">
         <div class="num"><small>the ball misses your friend by</small><b>${dist(Math.abs(m.side))}</b> to the ${side}</div>
@@ -632,10 +867,31 @@ function explain() {
       <div class="num"><small>turn per hour</small><b>${(15 * s).toFixed(1)}°</b> ${lat >= 0 ? 'clockwise' : 'counterclockwise'}</div></div>
       <p>A heavy pendulum keeps swinging in the same direction in space. The ground turns under it at <b>sin(latitude)</b> times Earth's rate, so seen from the ground the swing slowly turns, and its trace in the sand makes a star.</p>
       <p>At the poles it turns once a day; at the equator not at all. Paris (48.8°): once in about 32 hours. In the picture one second is ${Number($('slow').value) * 2} hours.</p>`;
+  } else if (sc.kind === 'storm' && sc.aloft) {
+    box.innerHTML = `<p>High up, the air hardly rubs on the ground. Pushed toward the low, it turns until the turning balances the push, and then it blows <b>around</b> the low instead of into it: <b>counterclockwise</b> in the north, <b>clockwise</b> in the south. Weather maps show this: the wind follows the lines of equal pressure.</p>
+      <p>A rule from it, for the north: stand with the wind at your back, and the low is on your <b>left</b> (in the south, on your right). Near the ground (switch off "High up") friction lets the air cross toward the low, which is why storms spiral in.</p>`;
   } else if (sc.kind === 'storm') {
     const lat = Math.abs(Number($('lat').value));
     box.innerHTML = `<p>Low pressure in the middle pulls the air in (dashed lines). On the turning ground the air drifts to the <b>right</b> in the north and to the <b>left</b> in the south, so it spirals in instead of flowing straight: <b>counterclockwise</b> in the north, <b>clockwise</b> in the south.</p>
       <p>The air needs hours to days to arrive, so even Earth's slow turn has time to act. This is why hurricanes turn opposite ways in the two halves of the world, and why they almost never form within about 5° of the equator, where the turning is too weak${lat < 5 ? ' (try a higher latitude)' : ''}. In the picture one second is ${(6 * Number($('slow').value)).toFixed(1)} hours.</p>`;
+  } else if (sc.kind === 'trades') {
+    box.innerHTML = `<p>The sun heats the air most near the equator. It rises there, and near the ground air flows in from about 30° north and south to take its place. Without Earth's spin it would blow straight north or south (left).</p>
+      <p>On the turning Earth it drifts to the right in the north and to the left in the south: in both it turns <b>west</b>. So the trade winds blow <b>from the northeast</b> and <b>from the southeast</b>. Sailing ships used them for centuries to cross the oceans westward, as Columbus did in 1492. In the picture one second is ${(2 * Number($('slow').value)).toFixed(1)} days.</p>`;
+  } else if (sc.kind === 'loops') {
+    const lat = Math.abs(Number($('lat').value));
+    const s = Math.sin(lat * DEG);
+    const period = s > 1e-3 ? Math.PI / (OMEGA * s) : Infinity;
+    const radius = s > 1e-3 ? 0.3 / (2 * OMEGA * s) : Infinity;
+    box.innerHTML = `<div class="nums">
+      <div class="num"><small>one loop takes</small><b>${Number.isFinite(period) ? hours(period) : 'never'}</b></div>
+      <div class="num"><small>size of a loop (across)</small><b>${Number.isFinite(radius) ? dist(2 * radius) : '—'}</b></div></div>
+      <p>A storm pushes the sea surface east at 30 cm/s, then the wind stops. Nothing pushes the water any more, but on the turning ground it keeps drifting to the right, so it runs in <b>circles</b>: clockwise in the north, counterclockwise in the south. A slow current carries the circles along.</p>
+      <p>One circle takes <b>half a "Foucault day"</b>: 12 hours divided by sin(latitude). Drifting buoys draw exactly these loops on ocean maps. This is also what the air would do without friction.</p>`;
+  } else if (sc.kind === 'eotvos') {
+    const lat = Number($('lat').value) * DEG;
+    const e = eotvos(lat, sc.v);
+    box.innerHTML = `<p>To go around in a circle you need a pull toward its center, and the faster you go around, the more pull it takes. Earth carries everything around its axis. Going <b>east</b>, you go around faster than the ground, so more of gravity is used for the circle and less presses you on the scale: you are <b>lighter</b>. Going <b>west</b>: heavier.</p>
+      <p>This is the part of Earth's spin that runs along the ground (the gray arrow on the globe): it grows with cos(latitude), largest at the equator, zero at the poles. A smaller part comes from following the curve of Earth itself, and makes you lighter either way: here ${((100 * e.curve) / 9.81 * 1000).toFixed(0)} g. Loránd Eötvös measured the effect on ships in 1908.</p>`;
   } else {
     const g = 9.81, T = Math.sqrt(200 / g);
     const lat = Number($('lat').value) * DEG;
@@ -741,11 +997,20 @@ function labels() {
   $('latV').textContent = `${Math.abs(lat).toFixed(1)}° ${lat > 0 ? 'north' : lat < 0 ? 'south' : ''}`;
   $('boostV').textContent = scene.boost ? `${Math.round(scene.boost).toLocaleString('en-US')} × faster` : '';
   $('slowV').textContent = `${Math.round(Number($('slow').value) * 100)}%`;
-  const kind = state.mode === 'earth' ? state.preset : 'play';
+  const kind = state.mode === 'earth' ? state.preset : state.playKind === 'station' ? 'station' : 'play';
   $('boostRow').hidden = !(kind === 'cannon' || kind === 'sink' || kind === 'tower');
-  $('go').textContent = kind === 'foucault' ? 'Start the pendulum' : kind === 'storm' ? 'Start the storms' : kind === 'tower' ? 'Drop' : kind === 'sink' ? 'Pull the plug' : kind === 'cannon' ? 'Fire' : 'Throw';
+  $('aloftRow').hidden = kind !== 'storm';
+  $('vehicleRow').hidden = kind !== 'eotvos';
+  $('vehicleV').textContent = `${state.vehicle} m/s`;
+  $('ringV').textContent = `${Math.round(10 ** Number($('ring').value))} m`;
+  $('go').disabled = kind === 'eotvos';
+  $('go').textContent = kind === 'foucault' ? 'Start the pendulum' : kind === 'storm' ? 'Start the storms' : kind === 'tower' ? 'Drop' : kind === 'sink' ? 'Pull the plug' : kind === 'cannon' ? 'Fire' : kind === 'station' ? 'Let go' : kind === 'trades' || kind === 'loops' ? 'Start' : kind === 'eotvos' ? 'Always on' : 'Throw';
   const caps = {
     play: ['Not turning', 'Turning with the roundabout'],
+    station: ['Outside the station, not turning', 'Inside, turning with the station'],
+    trades: ['Without Earth\u2019s spin', 'With Earth\u2019s spin'],
+    loops: ['North', 'South'],
+    eotvos: ['From above the north pole', 'On the scale'],
     cannon: ['From space', 'From the ground'],
     sink: ['From space', 'From the ground'],
     foucault: ['From space', 'From the ground'],
@@ -771,8 +1036,24 @@ $('tabEarth').addEventListener('click', () => setMode('earth'));
 $('fromEdge').addEventListener('click', () => { state.fromEdge = true; $('fromEdge').classList.add('on'); $('fromCenter').classList.remove('on'); reset(); });
 $('fromCenter').addEventListener('click', () => { state.fromEdge = false; $('fromCenter').classList.add('on'); $('fromEdge').classList.remove('on'); reset(); });
 document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => setPreset(b.dataset.preset)));
+const setPlayKind = (k) => {
+  state.playKind = k;
+  $('kindRound').classList.toggle('on', k === 'round');
+  $('kindStation').classList.toggle('on', k === 'station');
+  $('roundBox').hidden = k !== 'round';
+  $('stationBox').hidden = k !== 'station';
+  reset();
+};
+$('kindRound').addEventListener('click', () => setPlayKind('round'));
+$('kindStation').addEventListener('click', () => setPlayKind('station'));
+document.querySelectorAll('[data-vehicle]').forEach((b) => b.addEventListener('click', () => {
+  state.vehicle = Number(b.dataset.vehicle);
+  document.querySelectorAll('[data-vehicle]').forEach((x) => x.classList.toggle('on', x === b));
+  reset();
+}));
+$('aloft').addEventListener('change', reset);
 document.querySelectorAll('[data-lat]').forEach((b) => b.addEventListener('click', () => { $('lat').value = b.dataset.lat; reset(); }));
-for (const id of ['rpm', 'speed', 'lat', 'boost', 'slow']) $(id).addEventListener('input', reset);
+for (const id of ['rpm', 'speed', 'lat', 'boost', 'slow', 'ring']) $(id).addEventListener('input', reset);
 $('showSum').addEventListener('change', () => {});
 $('go').addEventListener('click', () => { reset(); state.running = true; });
 $('pause').addEventListener('click', () => {
@@ -795,6 +1076,12 @@ function tick(now) {
     drawFoucault(state.t);
   } else if (scene.kind === 'storm') {
     if (drawStorm(state.t)) state.running = false;
+  } else if (scene.kind === 'trades') {
+    if (drawTrades(state.t)) state.running = false;
+  } else if (scene.kind === 'loops') {
+    if (drawLoops(state.t)) state.running = false;
+  } else if (scene.kind === 'eotvos') {
+    drawEotvos(now);
   } else {
     const r = drawTower(state.t);
     if (r.done) state.running = false;
