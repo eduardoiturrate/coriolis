@@ -130,6 +130,8 @@
   const TOPICS = [
     { slug: 'coriolis', group: 0, title: 'Coriolis effect', blurb: 'A thrown ball flies straight, but the ground under it turns. A roundabout, a space station, cannon shells, storms, trade winds and a pendulum.' },
     { slug: 'centrifugal', group: 0, title: 'Centrifugal force', blurb: 'A ball on a string, water in a spinning bucket, and a ride that pins you to the wall. Is the outward force real?' },
+    { slug: 'jump', group: 0, title: 'Jumping on a spinning station', blurb: 'Do you float if you jump on a spinning platform? No: you come down, a little ahead of where you left.' },
+    { slug: 'hub', group: 0, title: 'Arriving at the hub', blurb: 'At the center of a spinning station you weigh nothing, and the rim rushes past. What if you let go, and how do you climb down?' },
     { slug: 'lagrange', group: 0, title: 'Lagrange points', blurb: 'Five places near two large bodies where a small one can stay in place. Found on the turning map.' },
     { slug: 'gyroscope', group: 1, title: 'Gyroscopes', blurb: 'Why a spinning wheel does not fall over, and why it turns sideways when you push it.' },
     { slug: 'momentum', group: 1, title: 'Angular momentum', blurb: 'A skater who pulls in the arms, a cat that turns in the air, and a racket that flips about one axis.' },
@@ -156,6 +158,8 @@
   const ICONS = {
     coriolis: ic(`<circle cx="32" cy="32" r="22" stroke="${W}"/><path d="M32 54C27 40 36 28 50 18" stroke="${B}"/><path d="M42 18h8v8" stroke="${B}"/>`),
     centrifugal: ic(`<circle cx="30" cy="32" r="15" stroke="${W}" stroke-dasharray="3 5"/><circle cx="45" cy="32" r="5" fill="${A}" stroke="none"/><path d="M30 32h13" stroke="${G}"/><path d="M51 32h9M56 28l4 4-4 4" stroke="${B}"/>`),
+    jump: ic(`<path d="M4 58Q32 36 60 58" stroke="${G}"/><path d="M30 44V30" stroke="${W}"/><circle cx="30" cy="26" r="4" stroke="${W}"/><path d="M30 24C34 6 54 6 52 38" stroke="${B}" stroke-dasharray="2 5"/><path d="M47 33l5 6 5-6" stroke="${B}"/>`),
+    hub: ic(`<circle cx="32" cy="32" r="24" stroke="${W}"/><path d="M32 32V8M32 32l21 12M32 32L11 44" stroke="${W}" stroke-dasharray="1 0"/><circle cx="32" cy="32" r="3.5" fill="${A}" stroke="none"/><path d="M32 32C38 28 44 34 50 26" stroke="${B}"/><path d="M46 24l5 2-2 5" stroke="${B}"/>`),
     lagrange: ic(`<circle cx="22" cy="34" r="11" stroke="${Y}"/><circle cx="48" cy="34" r="4" stroke="${A}"/><circle cx="35" cy="14" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="54" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="58" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="4" cy="34" r="2.5" fill="${B}" stroke="none"/>`),
     gyroscope: ic(`<ellipse cx="38" cy="26" rx="16" ry="8" transform="rotate(-20 38 26)" stroke="${A}"/><path d="M8 54l22-22" stroke="${W}"/><path d="M12 12c6-4 14-4 20 0" stroke="${B}"/><path d="M28 8l4 4-5 3" stroke="${B}"/>`),
     momentum: ic(`<circle cx="32" cy="32" r="5" fill="${W}" stroke="none"/><path d="M32 32L12 22M32 32L52 42" stroke="${W}"/><circle cx="12" cy="22" r="4" fill="${A}" stroke="none"/><circle cx="52" cy="42" r="4" fill="${A}" stroke="none"/><path d="M52 14a24 24 0 0 0-20-6" stroke="${B}"/><path d="M52 6v8h-8" stroke="${B}"/>`),
@@ -559,6 +563,7 @@
     section(text, o = {}) {
       const d = this._add(el('div', 'title', text), o);
       this.items.push({ row: d, show: o.show });
+      this.refresh();
       return d;
     }
     hint(textOrFn, o = {}) {
@@ -634,6 +639,7 @@
         box.appendChild(b);
       }
       this.items.push({ row: box, show: o.show });
+      this.refresh();
       return box;
     }
     /** Buttons that run a function: items of { text, fn, id }. */
@@ -648,6 +654,7 @@
       }
       this.items.push({ row: box, show: o.show });
       box.buttons = out;
+      this.refresh();
       return box;
     }
     set(id, value, silent) {

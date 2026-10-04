@@ -19,6 +19,12 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
   dropped ball, with 2D and 3D views. ([Details](coriolis/README.md))
 - `centrifugal`: a ball on a string (cut it), water in a spinning bucket (a parabola), and a wall
   ride that pins you with friction. The outward force is a pretend force of the turning frame.
+- `jump`: do you float if you jump on a spinning station? No. You fly straight, the curved floor
+  comes up to meet you, and you land a little ahead of where you left (a jump straight up lands
+  about 25 cm ahead on a 60 m wheel). Forward and backward jumps, any size of station.
+- `hub`: arriving at the center of a spinning station. You weigh nothing there, the rim rushes past at
+  31 m/s (for 100 m and 1 g), a gentle push-off sends you out in a spiral, and a ladder gives you the
+  station's spin with a sideways push (2 m ω u).
 - `lagrange`: the five points of the restricted three-body problem, on a map of the effective
   potential. Place a particle anywhere. L4 and L5 are stable for a mass ratio below 0.0385.
 

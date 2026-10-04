@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Arriving at the hub · Spin</title>
+<meta name="description" content="At the center of a spinning station you weigh nothing, and the rim sweeps past very fast. What happens if you let go, and how do you climb down to the floor?" />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+const G0 = 9.81, MASS = 80;
+
+const app = Spin.app({
+  slug: 'hub',
+  sub: 'You arrive at the center of a spinning station, and you are not turning. Do you feel gravity? What does the station do? How do you get to the floor?',
+  views: [{ caption: '' }, { caption: '' }, { caption: '', span: 2, short: true }],
+  rows: 'minmax(0, 1fr) minmax(0, 0.45fr)',
+  go: 'Start', speed: { min: 0.5, max: 40, value: 4, step: 0.5, fmt: (v) => `${v}× real time` },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['weight', 'Weight and view'], ['drift', 'Let go'], ['ladder', 'Climb down']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('R', { label: 'Radius of the station', min: 20, max: 500, log: true, value: 100, fmt: (v) => `${v} m` });
+ui.slider('gf', { label: 'Gravity at the floor', min: 0.2, max: 2, step: 0.05, value: 1, fmt: (v) => `${v.toFixed(2)} g` });
+ui.slider('rf', { label: 'Where you are, from the axis to the floor', min: 0, max: 1, step: 0.01, value: 0.5, fmt: (v) => `${Math.round(v * 100)}% of the way (${Math.round(v * ui.v.R)} m from the axis)`, show: is('weight') });
+ui.chips([{ text: 'At the axis', set: { rf: 0 } }, { text: 'Halfway', set: { rf: 0.5 } }, { text: 'At the floor', set: { rf: 1 } }], { show: is('weight') });
+ui.slider('u', { label: 'Speed you push off at', min: 0.1, max: 3, step: 0.1, value: 1, fmt: (v) => `${v.toFixed(1)} m/s`, show: is('drift') });
+ui.slider('ul', { label: 'Speed you climb down at', min: 0.2, max: 2, step: 0.1, value: 0.6, fmt: (v) => `${v.toFixed(1)} m/s`, show: is('ladder') });
+ui.actions([{ text: 'Let go of the ladder now', fn: () => release() }], { show: is('ladder') });
+
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo(m === 'weight' ? 'Restart' : m === 'drift' ? 'Let go' : 'Start climbing');
+  tr.loopBox.parentElement.hidden = m === 'weight';
+  if (m === 'weight') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.45fr)'); app.caption(0, 'Seen from outside, not turning'); app.caption(1, 'Seen from the station'); app.caption(2, 'Weight and floor speed, from the axis to the floor'); }
+  else { app.show(2, 2); app.layout(2, 'minmax(0, 1fr)'); app.caption(0, 'Seen from outside, not turning'); app.caption(1, 'Seen from the station'); }
+}
+
+const params = () => { const R = ui.v.R, w = Math.sqrt((ui.v.gf * G0) / R); return { R, w }; };
+const mph = (v) => v * 2.23694;
+
+// Drawing parts
+function station(p, R, ang) {
+  p.circle({ x: 0, y: 0 }, R, { fill: '#0f1a2b', stroke: 'rgba(255,255,255,0.3)', width: 2 });
+  for (let k = 0; k < 8; k++) p.line([V.polar(R * 0.04, ang + (k * TAU) / 8), V.polar(R, ang + (k * TAU) / 8)], 'rgba(255,255,255,0.14)', 1.4);
+  p.circle({ x: 0, y: 0 }, R * 0.5, { stroke: 'rgba(255,255,255,0.08)', width: 1 });
+  p.circle({ x: 0, y: 0 }, R * 0.985, { stroke: 'rgba(155,231,166,0.7)', width: 3.5 });
+  p.circle({ x: 0, y: 0 }, R * 0.03, { fill: '#c9d3df' });
+}
+function stars(p, R, ang) {
+  for (let k = 0; k < 32; k++) p.dot(V.polar(R * (1.2 + 0.05 * (k % 3)), ang + (k * TAU) / 32 + (k % 5) * 0.03), 'rgba(255,255,255,0.55)', k % 4 === 0 ? 3 : 2);
+}
+
+// ---------- Weight and view ----------
+
+function drawWeight() {
+  const { R, w } = params();
+  const r = ui.v.rf * R, t = tr.t, th = w * t;
+  const gfelt = (w * w * r) / G0, vfloor = w * r, vrim = w * R;
+  const box = R * 1.38;
+  const L = pens[0].begin().box(-box, box, -box, box, 8);
+  stars(L, R, 0); station(L, R, th);
+  for (let k = 0; k < 4; k++) { const a = th + (k * TAU) / 4, q = V.polar(R, a); L.arrow(q, V.mul(V.polar(1, a + Math.PI / 2), R * 0.2), C.ball, 2.6, k === 0 ? `${vrim.toFixed(0)} m/s` : ''); }
+  L.circle({ x: 0, y: 0 }, R * 0.05, { fill: '#fff', stroke: '#fff', width: 1 });
+  L.text('you, floating at the hub', { x: 0, y: 0 }, { dy: 18, size: 11, color: '#fff' });
+  if (r > 0.5) {
+    const q = V.polar(r, th);
+    L.circle({ x: 0, y: 0 }, r, { stroke: 'rgba(255,162,74,0.35)', width: 1.4, dash: [4, 5] });
+    L.arrow(q, V.mul(V.polar(1, th + Math.PI / 2), R * 0.2 * (vfloor / Math.max(vrim, 1e-9))), C.you, 3, '');
+    L.arrow(q, V.mul(V.polar(1, th + Math.PI), R * 0.2 * (gfelt / ui.v.gf)), C.friend, 3.2, 'the floor pushes you in');
+    L.dot(q, C.ink, 7);
+  }
+  L.note('You are not turning: the station turns around you, and the rim rushes past');
+
+  const Rv = pens[1].begin().box(-box, box, -box, box, 8);
+  stars(Rv, R, -th); station(Rv, R, 0);
+  // You at the hub, seen from the station: you turn the other way.
+  Rv.arrow({ x: 0, y: 0 }, V.polar(R * 0.2, -th + 0.5), '#fff', 2.5, '');
+  Rv.text('you at the hub turn this way', { x: 0, y: 0 }, { dy: 24, size: 10.5, color: '#fff' });
+  if (r > 0.5) {
+    const q = { x: r, y: 0 };
+    Rv.arrow(q, { x: R * 0.2 * (gfelt / ui.v.gf), y: 0 }, C.ink, 3.5, 'weight');
+    Rv.dot(q, C.ink, 7);
+  }
+  Rv.note('The station is still. The stars wheel round, and you at the hub turn');
+
+  const q = pens[2].begin();
+  const wd = (q.cw - 12) / 2 - 2;
+  const c1 = q.chart({ x: 4, y: 2, w: wd, h: q.ch - 6 }, { x0: 0, x1: R, y0: 0, y1: ui.v.gf * 1.1, title: 'Weight (in g) against distance from the axis', xTicks: 5, yTicks: 4, fmtY: (v) => v.toFixed(1), fmtX: (v) => `${Math.round(v)} m`, padB: 22 });
+  c1.line([{ x: 0, y: 0 }, { x: R, y: ui.v.gf }], C.friend, 3); c1.dot(r, gfelt, C.ink, 6.5);
+  const c2 = q.chart({ x: 8 + wd, y: 2, w: wd, h: q.ch - 6 }, { x0: 0, x1: R, y0: 0, y1: vrim * 1.1, title: 'Speed of the floor (m/s) against distance from the axis', xTicks: 5, yTicks: 4, fmtX: (v) => `${Math.round(v)} m`, fmtY: (v) => v.toFixed(0), padB: 22 });
+  c2.line([{ x: 0, y: 0 }, { x: R, y: vrim }], C.ball, 3); c2.dot(r, vfloor, C.ink, 6.5);
+
+  app.explain(`${nums([['weight where you are', `${gfelt.toFixed(2)}`, 'g'], ['floor speed there', `${vfloor.toFixed(1)}`, `m/s (${mph(vfloor).toFixed(0)} mph)`], ['the rim moves at', `${vrim.toFixed(1)}`, `m/s (${mph(vrim).toFixed(0)} mph)`], ['the station turns', `${((w * 60) / TAU).toFixed(2)}`, 'times a minute']])}
+    <p><b>Weight:</b> what you feel as gravity is the floor pushing you around a circle. The push needed is ω²r, so it grows in a straight line with the distance from the axis. At the axis the circle has no size, and there is nothing to push: you feel <b>no gravity</b> there, however fast the station turns. Halfway to the floor you weigh half as much.</p>
+    <p><b>What you see:</b> if you arrive at the hub not turning (left), the station turns around you, and the rim goes by at ωR, here ${vrim.toFixed(0)} m/s. If you join the turning (right), the station looks still, and the stars and anything outside wheel around you, the other way. Both are right. The rim is moving far too fast to step onto from the hub, which is why the next two modes matter.</p>`);
+}
+
+// ---------- Let go ----------
+
+function drawDrift() {
+  const { R, w } = params();
+  const u = ui.v.u, T = R / u;
+  const t = Math.min(tr.t, T);
+  if (tr.running && tr.t > T + 1.2) tr.finish();
+  const th = w * t, box = R * 1.38;
+  const pin = (s) => ({ x: u * s, y: 0 });
+  const pr = (s) => V.rot(pin(s), -w * s);
+  const arrived = t >= T;
+  const L = pens[0].begin().box(-box, box, -box, box, 8);
+  stars(L, R, 0); station(L, R, th);
+  L.line([{ x: 0, y: 0 }, pin(t)], C.ink, 3.2);
+  L.dot(pin(t), C.ink, 7); L.text('you', pin(t), { dy: -14, size: 11, color: C.ink });
+  L.arrow(pin(t), { x: R * 0.18, y: 0 }, C.you, 2.5, 'straight on');
+  if (arrived) { const q = V.polar(R, th); L.circle({ x: R, y: 0 }, R * 0.04, { stroke: C.warn, width: 3 }); L.arrow({ x: R, y: 0 }, { x: 0, y: R * 0.2 }, C.warn, 3, `the floor passes at ${(w * R).toFixed(0)} m/s`); }
+  L.note(arrived ? 'The floor meets you at full speed' : 'You drift straight out, and the floor turns beneath');
+
+  const Rv = pens[1].begin().box(-box, box, -box, box, 8);
+  stars(Rv, R, -th); station(Rv, R, 0);
+  const sp = []; for (let s = 0; s <= t + 1e-9; s += T / 300) sp.push(pr(s));
+  Rv.line(sp, C.ink, 3);
+  Rv.dot(pr(t), C.ink, 7);
+  Rv.note('From the station, you spiral out and backward');
+
+  const hit = w * R;
+  app.explain(`${nums([['time to reach the floor', fmt.time(T)], ['the station turns by', `${(w * T / TAU).toFixed(2)}`, 'turns meanwhile'], ['you meet the floor at', `${hit.toFixed(1)}`, `m/s (${mph(hit).toFixed(0)} mph)`]])}
+    <p>If you push off from the hub, even very gently, you move in a <b>straight line</b> (left, in the frame that does not turn). Nothing pulls you toward the floor, because gravity here is only the floor pushing, and it is not pushing you now. You have no sideways speed, but the floor at the rim moves at ωR. When you arrive, it hits you sideways at that speed: ${hit.toFixed(0)} m/s is like running into a moving car.</p>
+    <p>From the station's point of view (right), you do not go straight at all. You drift outward in a <b>spiral</b>, backward against the direction of the turn, bent by the Coriolis effect. It looks like an invisible hand pushing you sideways, and in a way it is: the station turning under you. That is why nobody should let go at the hub and hope.</p>`);
+}
+
+// ---------- Climb down ----------
+
+let released = null;
+function release() {
+  if (ui.v.mode !== 'ladder' || released) return;
+  const { R, w } = params();
+  const u = ui.v.ul, t = Math.min(tr.t, (R - 1.5) / u), r = 1.5 + u * t, th = w * t;
+  const er = V.polar(1, th), et = V.polar(1, th + Math.PI / 2);
+  released = { t0: t, p0: V.mul(er, r), v0: V.add(V.mul(er, u), V.mul(et, w * r)) };
+}
+tr.onStart = () => { released = null; };
+function drawLadder() {
+  const { R, w } = params();
+  const u = ui.v.ul, r0 = 1.5, Tdown = (R - r0) / u;
+  const box = R * 1.38;
+  let t = tr.t, onLadder = true, pin, pr, vrel = 0, tEnd = Tdown;
+  if (released) {
+    onLadder = false;
+    // Free flight in a straight line until the floor.
+    const { p0, v0, t0 } = released;
+    const a = V.dot(v0, v0), b = 2 * V.dot(p0, v0), c = V.dot(p0, p0) - R * R;
+    const tf = (-b + Math.sqrt(Math.max(0, b * b - 4 * a * c))) / (2 * a);
+    tEnd = t0 + tf;
+    const s = Math.min(t, tEnd) - t0;
+    if (s < 0) { onLadder = true; }
+    else {
+      pin = V.add(p0, V.mul(v0, s)); pr = V.rot(pin, -w * (t0 + s));
+      const vr = V.sub(V.add(v0, { x: 0, y: 0 }), { x: -w * pin.y, y: w * pin.x });
+      vrel = V.len(vr);
+    }
+  }
+  if (onLadder) {
+    const s = Math.min(t, Tdown), r = r0 + u * s;
+    pin = V.polar(r, w * s); pr = { x: r, y: 0 };
+    if (!released && t > Tdown) t = Tdown;
+  }
+  const done = onLadder ? tr.t >= Tdown : tr.t >= tEnd;
+  if (tr.running && tr.t > tEnd + 1.5) tr.finish();
+  const ts = onLadder ? Math.min(tr.t, Tdown) : Math.min(tr.t, tEnd);
+  const th = w * ts;
+  const r = V.len(pin);
+
+  const L = pens[0].begin().box(-box, box, -box, box, 8);
+  stars(L, R, 0); station(L, R, th);
+  // The path in space so far.
+  const path = [];
+  if (!released) { for (let s = 0; s <= ts + 1e-9; s += Math.max(ts / 200, 1e-3)) path.push(V.polar(r0 + u * s, w * s)); }
+  else {
+    const { p0, v0, t0 } = released;
+    for (let s = 0; s <= t0 + 1e-9; s += Math.max(t0 / 150, 1e-3)) path.push(V.polar(r0 + u * s, w * s));
+    for (let s = 0; s <= Math.min(tr.t, tEnd) - t0 + 1e-9; s += 0.05) path.push(V.add(p0, V.mul(v0, s)));
+  }
+  L.line(path, C.ink, 3);
+  L.dot(pin, C.ink, 7); L.text('you', pin, { dy: -14, size: 11, color: C.ink });
+  const er = V.norm(pin), et = { x: -er.y, y: er.x };
+  if (onLadder && r > 0.5) {
+    L.arrow(pin, V.mul(er, -R * 0.22 * (r / R)), C.friend, 3.2, 'ladder pushes in');
+    L.arrow(pin, V.mul(et, R * 0.22 * 0.35), C.spin, 3.2, 'and forward (drawn 10× larger)');
+  }
+  L.note(onLadder ? 'The ladder turns with the station, and carries you around' : 'Let go: you fly off straight');
+
+  const Rv = pens[1].begin().box(-box, box, -box, box, 8);
+  stars(Rv, R, -th); station(Rv, R, 0);
+  const rp = []; if (!released) { for (let s = 0; s <= ts + 1e-9; s += Math.max(ts / 100, 1e-3)) rp.push({ x: r0 + u * s, y: 0 }); }
+  else { const { p0, v0, t0 } = released; for (let s = 0; s <= t0 + 1e-9; s += Math.max(t0 / 100, 1e-3)) rp.push({ x: r0 + u * s, y: 0 }); for (let s = 0; s <= Math.min(tr.t, tEnd) - t0 + 1e-9; s += 0.05) rp.push(V.rot(V.add(p0, V.mul(v0, s)), -w * (t0 + s))); }
+  Rv.line([{ x: 0, y: 0 }, { x: R, y: 0 }], 'rgba(255,255,255,0.35)', 3);
+  for (let k = 1; k < 20; k++) Rv.line([{ x: (R * k) / 20, y: -R * 0.012 }, { x: (R * k) / 20, y: R * 0.012 }], 'rgba(255,255,255,0.35)', 1.5);
+  Rv.line(rp, C.ink, 3);
+  Rv.dot(pr, C.ink, 7);
+  const g = (w * w * r) / G0;
+  if (onLadder && r > 0.5) {
+    const sc = R * 0.22;
+    Rv.arrow(pr, { x: sc * (g / ui.v.gf), y: 0 }, C.ink, 3.2, 'weight');
+    Rv.arrow(pr, { x: 0, y: -sc * 0.35 }, C.friend, 3, 'Coriolis (pretend), 10×');
+    Rv.arrow({ x: pr.x, y: pr.y }, { x: 0, y: sc * 0.35 }, C.you, 3, 'ladder pushes you forward');
+  }
+  Rv.note(onLadder ? 'You climb down; you weigh more with each rung' : 'Let go: you curve backward');
+
+  const side = 2 * w * u * MASS;
+  app.explain(`${nums([['weight now', `${g.toFixed(2)}`, 'g'], ['sideways push of the ladder', `${side.toFixed(0)}`, `N (for ${MASS} kg)`], ['time to climb down', fmt.time(Tdown)], ...(released ? [['you hit the floor at', `${vrel.toFixed(1)}`, 'm/s relative to it']] : [])])}
+    <p>The safe way down is a ladder along a spoke. The ladder turns with the station, so each rung already moves the right way. Near the hub you hardly weigh anything, and the rungs move slowly. Going outward, you <b>gain weight gradually</b>, and you also have to speed up sideways, because each rung farther out is moving faster. You get the sideways speed by the ladder pushing you <b>forward</b>, with a force of 2 m ω u (the green arrow). From the station's side this is the Coriolis effect: it pushes you backward against the ladder. This push is how the station gives you its spin.</p>
+    <p>Let go in the middle (the button), and the push on you stops. You fly off in a straight line with the speed you had, and as the floor turns, the path curves backward. You hit the floor sideways, with the difference between your speed and its speed. Hold on to the ladder.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'weight') drawWeight(); else if (m === 'drift') drawDrift(); else drawLadder();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

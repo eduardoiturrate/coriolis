@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Jumping on a spinning station · Spin</title>
+<meta name="description" content="If you jump on a spinning platform that makes artificial gravity, do you float? No. You fly in a straight line and the curved floor comes up to meet you. You land a little ahead of where you left." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+const G0 = 9.81, HC = 1.0; // Earth's gravity, and the height of a standing person's center above the floor
+
+const app = Spin.app({
+  slug: 'jump',
+  sub: 'On a spinning station the floor is the outer rim, and “down” is outward. What happens when your feet leave the floor?',
+  views: [{ caption: 'Seen from outside, not turning (a close-up)' }, { caption: 'Seen by the person on the floor' }],
+  go: 'Jump again', speed: { min: 0.05, max: 1, value: 0.3, step: 0.01 },
+});
+const { ui, tr, pens } = app;
+
+ui.slider('R', { label: 'Radius of the station', min: 6, max: 500, log: true, value: 60, fmt: (v) => `${v} m` });
+ui.chips([{ text: 'A small ring 12 m', set: { R: 12 } }, { text: 'A big wheel 60 m', set: { R: 60 } }, { text: 'A huge ring 500 m', set: { R: 500 } }]);
+ui.slider('gf', { label: 'Gravity at the floor', min: 0.2, max: 2, step: 0.05, value: 1, fmt: (v) => `${v.toFixed(2)} g` });
+ui.slider('v0', { label: 'Speed of the jump', min: 1, max: 8, step: 0.1, value: 3.5, fmt: (v) => `${v.toFixed(1)} m/s`, hint: (v) => `On Earth, that jump would lift you ${(v.v0 ** 2 / (2 * G0)).toFixed(2)} m.` });
+ui.slider('tilt', { label: 'Direction of the jump', min: -70, max: 70, step: 1, value: 0, fmt: (v) => (v === 0 ? 'straight up' : v > 0 ? `${v}° forward, the way the floor turns` : `${-v}° backward`) });
+ui.chips([{ text: 'Straight up', set: { tilt: 0 } }, { text: 'Forward 45°', set: { tilt: 45 } }, { text: 'Backward 45°', set: { tilt: -45 } }]);
+ui.check('lean', 'Keep the body stiff (it keeps its direction in the air)', true);
+
+ui.on(() => tr.restart());
+
+/**
+ * The jump, worked out in space. A local frame at the moment of the jump: x goes the way the floor turns, y goes toward the
+ * center of the station, which is at (0, R). The floor is the circle of radius R around the center. The person leaves the
+ * floor with the speed of the floor, plus the jump, and then flies in a straight line.
+ */
+function solve() {
+  const { R, gf, v0, tilt } = ui.v;
+  const w = Math.sqrt((gf * G0) / R), r0 = R - HC, a = tilt * DEG;
+  const Cc = { x: 0, y: R };
+  const p0 = { x: 0, y: HC }, v = { x: w * r0 + v0 * Math.sin(a), y: v0 * Math.cos(a) };
+  const rel0 = V.sub(p0, Cc);
+  const T = (-2 * V.dot(rel0, v)) / V.dot(v, v); // the time when the center of the person is back at its starting distance from the center of the station
+  const lab = (t) => V.add(p0, V.mul(v, t));
+  const polar = (t) => { const q = V.sub(lab(t), Cc); return { r: Math.hypot(q.x, q.y), phi: Math.atan2(q.x, -q.y) }; };
+  const phiL = polar(T).phi;
+  const shift = (phiL - w * T) * R; // how far ahead of the takeoff spot on the floor (meters, along the floor)
+  let hmax = 0; for (let t = 0; t <= T; t += T / 200) hmax = Math.max(hmax, R - polar(t).r - HC); // how far the center of the person rises
+  return { R, w, r0, v, T, lab, polar, phiL, shift, hmax, floorSpeed: w * R, key: `${R}|${gf}|${v0}|${tilt}` };
+}
+let S = null;
+
+function stick(pen, c, dir, col, hl = 0.9) {
+  const a = V.sub(c, V.mul(dir, hl)), b = V.add(c, V.mul(dir, hl));
+  pen.line([a, b], col, 4);
+  pen.circle(V.add(b, V.mul(dir, hl * 0.22)), hl * 0.2, { fill: col, stroke: '#fff', width: 1.5 });
+  const arm = V.add(c, V.mul(dir, hl * 0.35)), side = { x: -dir.y, y: dir.x };
+  pen.line([V.sub(arm, V.mul(side, hl * 0.45)), V.add(arm, V.mul(side, hl * 0.45))], col, 3);
+}
+
+function draw(now) {
+  tr.step(now);
+  const key = `${ui.v.R}|${ui.v.gf}|${ui.v.v0}|${ui.v.tilt}`;
+  if (!S || S.key !== key) S = solve();
+  const { R, w, T, shift } = S;
+  const t = Math.min(tr.t, T + 2.2 / Math.max(tr.speed, 0.05) * 0.2 + 1.5);
+  if (tr.running && tr.t > T + 1.8) tr.finish();
+  const flying = t < T, since = Math.min(0.6, Math.max(0, t - T));
+  const relax = Math.min(1, since / 0.12);
+
+  // The path, for the boxes.
+  const N = 80, lab = [], rot = [];
+  for (let i = 0; i <= N; i++) { const tt = (T * i) / N, pp = S.polar(tt); lab.push(S.lab(tt)); rot.push({ x: R * (pp.phi - w * tt), y: R - pp.r }); }
+
+  // ---- Left: the close-up, from outside. The floor is an arc, and the marker on it moves.
+  const xs = lab.map((q) => q.x), phiEnd = Math.max(S.phiL, w * T) + w * 0.6;
+  const arcX = (phi) => R * Math.sin(phi), arcY = (phi) => R - R * Math.cos(phi);
+  const x1 = Math.max(...xs, arcX(phiEnd)) + 2.5, x0 = -2.5;
+  const y1 = Math.max(arcY(phiEnd), ...lab.map((q) => q.y)) + 2.6, y0 = -2.2;
+  const L = pens[0].begin().box(x0, x1, y0, y1, 12);
+  const floor = []; for (let k = -12; k <= 60; k++) { const phi = -0.15 + ((phiEnd + 0.3) * (k + 12)) / 72; floor.push({ x: arcX(phi), y: arcY(phi) }); }
+  L.line(floor, 'rgba(155,231,166,0.75)', 3.5);
+  // Marks on the floor that go with it: it turns the way x goes.
+  const spacing = 1.5 / R;
+  for (let k = -10; k <= 80; k++) { const phi = k * spacing + ((w * t) % spacing); if (phi < -0.15 || phi > phiEnd + 0.15) continue; const q = { x: arcX(phi), y: arcY(phi) }; L.line([q, { x: q.x - Math.sin(phi) * 0.35, y: q.y + Math.cos(phi) * 0.35 }], 'rgba(155,231,166,0.4)', 1.2); }
+  L.line(lab, 'rgba(255,162,74,0.35)', 2, [5, 5]);
+  const upTo = lab.filter((_, i) => (T * i) / N <= t);
+  L.line(upTo, C.ink, 3);
+  const mk = { x: arcX(w * t), y: arcY(w * t) };
+  L.dot({ x: 0, y: 0 }, 'rgba(255,255,255,0.5)', 4); L.text('where you left', { x: 0, y: 0 }, { dy: 16, size: 10.5, color: 'rgba(255,255,255,0.65)' });
+  L.circle(mk, 0.18, { fill: 'rgba(155,231,166,0.5)', stroke: C.you, width: 2 }); L.text('that spot on the floor now', mk, { dy: 18, size: 10.5, color: C.you });
+  let c, dir;
+  if (flying) { c = S.lab(t); dir = ui.v.lean ? { x: 0, y: 1 } : V.norm({ x: -Math.sin(S.polar(t).phi), y: Math.cos(S.polar(t).phi) }); }
+  else {
+    const phi = S.phiL + w * since, r = S.r0, pos = { x: r * Math.sin(phi), y: R - r * Math.cos(phi) };
+    c = pos; const radial = { x: -Math.sin(phi), y: Math.cos(phi) };
+    const hold = ui.v.lean ? { x: 0, y: 1 } : radial;
+    dir = V.norm(V.add(V.mul(hold, 1 - relax), V.mul(radial, relax)));
+  }
+  stick(L, c, dir, C.friend);
+  if (flying) L.arrow(c, V.mul(V.norm(S.v), 3.0), C.you, 3, 'straight on, at the floor’s speed');
+  L.note(flying ? 'Nothing pushes you now: you fly straight' : 'The floor has come up and met you');
+
+  // ---- Right: unrolled, with the person at home. x is along the floor, y is the height above it.
+  const rx = rot.map((q) => q.x), ry = rot.map((q) => q.y);
+  const half = Math.max(1.6, 1.5 * Math.max(...rx.map(Math.abs), 0.001) + 0.8);
+  const ytop = Math.max(2.8, Math.max(...ry) + 1.8);
+  const R2 = pens[1].begin().box(-half, half, -0.9, ytop, 12);
+  R2.line([{ x: -half, y: 0 }, { x: half, y: 0 }], 'rgba(155,231,166,0.8)', 3.5);
+  for (let x = Math.ceil(-half); x <= half; x++) R2.line([{ x, y: 0 }, { x: x - 0.1, y: -0.12 }], 'rgba(155,231,166,0.35)', 1.2);
+  R2.line(rot, 'rgba(255,162,74,0.35)', 2, [5, 5]);
+  const upRot = rot.filter((_, i) => (T * i) / N <= t);
+  R2.line(upRot, C.ink, 3);
+  const landX = rot[rot.length - 1].x;
+  R2.dot({ x: 0, y: 0 }, '#fff', 4); R2.text('where you left', { x: 0, y: 0 }, { dx: landX < 0 ? 8 : -8, dy: 18, size: 10.5, align: landX < 0 ? 'left' : 'right', color: 'rgba(255,255,255,0.7)' });
+  R2.dot({ x: landX, y: 0 }, C.ink, 5); R2.text('where you land', { x: landX, y: 0 }, { dx: landX < 0 ? -8 : 8, dy: 18, size: 10.5, align: landX < 0 ? 'right' : 'left', color: C.ink });
+  if (Math.abs(shift) > 0.01) R2.line([{ x: 0, y: -0.45 }, { x: landX, y: -0.45 }], 'rgba(255,255,255,0.6)', 1.5);
+  let cr, dr;
+  if (flying) { const q = S.polar(t); cr = { x: R * (q.phi - w * t), y: R - q.r }; const lean = ui.v.lean ? -q.phi : 0; dr = { x: Math.sin(lean), y: Math.cos(lean) }; }
+  else { cr = { x: landX, y: HC }; dr = { x: 0, y: 1 }; if (ui.v.lean) { const lean = -S.phiL * (1 - relax); dr = { x: Math.sin(lean), y: Math.cos(lean) }; } }
+  stick(R2, cr, dr, C.friend);
+  R2.arrow({ x: -half * 0.92, y: ytop * 0.6 }, { x: 0, y: -0.9 }, 'rgba(255,255,255,0.5)', 2.5, 'down');
+  R2.note(flying ? 'You rise and come down, bent sideways by the turning' : `Landed ${fmt.dist(Math.abs(shift))} ${shift >= 0 ? 'ahead of' : 'behind'} the takeoff spot`);
+
+  const rpm = (w * 60) / TAU;
+  app.explain(`${nums([['time in the air', `${T.toFixed(2)}`, 's'], ['you rise', fmt.dist(S.hmax)], ['you land', `${fmt.dist(Math.abs(shift))} ${shift >= 0 ? 'ahead' : 'behind'}`], ['floor speed', `${S.floorSpeed.toFixed(1)}`, 'm/s'], ['the station turns', `${rpm.toFixed(1)}`, 'times a minute']])}
+    <p><b>Left, from outside:</b> before the jump you were going around in a circle, at the speed of the floor. The floor pushed you inward all the time; that push is what you feel as weight. When your feet leave the floor, the push stops. You fly off in a <b>straight line</b> at the same speed (the orange path). The floor keeps turning, and because it is a circle, it curves up toward your straight line. It meets your feet again, and that is the landing. You never float.</p>
+    <p><b>Right, from the floor:</b> you go up, and then you come back down. A jump straight up (toward the center) does not land you in the same place. On the way in, you are at a smaller radius, where the floor moves slower than you do, so you drift <b>ahead</b> in the direction of the turn. This is the Coriolis effect. For a small jump it is about 4/3 × ω × v³ / g², so a bigger station (a slower turn) gives a smaller shift. Jumping forward means you already move faster than the floor: you feel heavier and go less high. Jumping backward does the opposite.</p>
+    <p>With the stiff body setting, the figure keeps its direction in space while it is in the air, so it seems to lean back as seen from the floor. A real person turns the arms and legs to land.</p>`);
+}
+tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>
