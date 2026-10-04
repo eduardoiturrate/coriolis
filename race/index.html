@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rolling race and the spool · Spin</title>
+<meta name="description" content="A ring, a hollow sphere, a cylinder and a solid sphere roll down a slope. The one with less of its mass at the rim wins. And which way does a spool roll when you pull its thread?" />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+const G = 9.81;
+
+const app = Spin.app({
+  slug: 'race',
+  sub: 'Energy that goes into spinning is not left over for moving forward. The shape of the mass decides how it is shared.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Release', speed: { min: 0.1, max: 1.5, value: 0.6, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['race', 'Race down a slope'], ['spool', 'The spool']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('ang', { label: 'Steepness of the slope', min: 5, max: 40, step: 1, value: 20, fmt: (v) => `${v}°`, show: is('race') });
+ui.check('block', 'Include a block that slides without friction', true, { show: is('race') });
+ui.slider('phi', { label: 'Direction of the pull on the thread, above the ground', min: 0, max: 85, step: 1, value: 20, fmt: (v) => `${v}°`, show: is('spool') });
+ui.slider('rr', { label: 'Thickness of the axle, against the rims', min: 0.2, max: 0.9, step: 0.01, value: 0.5, fmt: (v) => v.toFixed(2), show: is('spool') });
+ui.chips([{ text: 'Low pull 10°', set: { phi: 10 } }, { text: 'Just right', set: { phi: 60 } }, { text: 'High pull 75°', set: { phi: 75 } }], { show: is('spool') });
+
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo(m === 'race' ? 'Release' : 'Pull');
+  app.caption(0, m === 'race' ? 'The race (the lanes are side by side, shown slanted)' : 'The spool, seen from the side');
+  app.caption(1, m === 'race' ? 'Where the energy goes, and the speeds' : 'Which way it rolls, against the angle of the pull');
+}
+
+// ---------- The race ----------
+
+const OBJ = [
+  { name: 'Block, no friction', k: 0, col: '#aeb9c8', block: true },
+  { name: 'Solid sphere', k: 0.4, col: '#4fc3f7' },
+  { name: 'Solid cylinder', k: 0.5, col: '#9be7a6' },
+  { name: 'Hollow sphere', k: 2 / 3, col: '#ffd54f' },
+  { name: 'Ring', k: 1, col: '#f06292' },
+];
+function drawRace() {
+  const th = ui.v.ang * DEG, L = 4;
+  const list = OBJ.filter((o) => ui.v.block || !o.block);
+  const acc = (o) => (G * Math.sin(th)) / (1 + o.k);
+  const tFin = (o) => Math.sqrt((2 * L) / acc(o));
+  const tmax = Math.max(...list.map(tFin));
+  const t = tr.running || tr.endedAt ? tr.t * 1.0 : 0;
+  if (tr.running && t > tmax + 1.2) tr.finish();
+  const dir = { x: Math.cos(th), y: -Math.sin(th) }, up = { x: Math.sin(th), y: Math.cos(th) };
+  const p = pens[0].begin().box(-0.8, 6.2, -2.7, 2.7, 14);
+  const lane = (i) => V.mul(up, 0);
+  const start = { x: 0, y: 2.0 };
+  const end = V.add(start, V.mul(dir, L + 0.4));
+  list.forEach((o, i) => {
+    const off = { x: i * 0.0, y: 0 };
+    const o0 = V.add(start, { x: 0.2 * i, y: -0.55 * i });
+    const o1 = V.add(o0, V.mul(dir, L + 0.6));
+    p.line([o0, o1], 'rgba(255,255,255,0.28)', 2.5);
+    const s = Math.min(L, 0.5 * acc(o) * t * t);
+    const c0 = V.add(V.add(o0, V.mul(dir, s)), V.mul(up, 0.22));
+    if (o.block) p.poly([V.add(c0, V.add(V.mul(dir, -0.2), V.mul(up, -0.2))), V.add(c0, V.add(V.mul(dir, 0.2), V.mul(up, -0.2))), V.add(c0, V.add(V.mul(dir, 0.2), V.mul(up, 0.2))), V.add(c0, V.add(V.mul(dir, -0.2), V.mul(up, 0.2)))], { fill: o.col, stroke: '#fff', width: 1.5 });
+    else {
+      const ang = -s / 0.22;
+      p.circle(c0, 0.22, { fill: o.name === 'Ring' ? 'rgba(240,98,146,0.0)' : `${o.col}55`, stroke: o.col, width: o.name === 'Ring' ? 4 : 2.5 });
+      p.line([c0, V.add(c0, V.polar(0.22, ang + th))], '#fff', 2);
+    }
+    p.line([V.add(o0, V.mul(dir, L)), V.add(V.add(o0, V.mul(dir, L)), V.mul(up, 0.5))], 'rgba(255,255,255,0.5)', 2);
+    if (s >= L - 1e-6 && t >= tFin(o)) p.text(`${list.filter((q) => tFin(q) < tFin(o) - 1e-9).length + 1}`, V.add(V.add(o0, V.mul(dir, L)), V.mul(up, 0.75)), { size: 13, color: o.col, weight: 800 });
+  });
+  p.text('finish', V.add(start, V.add(V.mul(dir, L), V.mul(up, 0.2))), { dx: 10, dy: -20, size: 10.5, color: 'rgba(255,255,255,0.55)' });
+  p.note('Same slope, same start: all let go together');
+
+  const q = pens[1].begin();
+  const hh = q.ch / 2 - 6;
+  const c1 = q.chart({ x: 4, y: 2, w: q.cw - 8, h: hh }, { x0: 0, x1: tmax * 1.05, y0: 0, y1: Math.max(...list.map((o) => acc(o) * tFin(o))) * 1.1, title: 'Speed (m/s) against time (s)', xTicks: 6, yTicks: 4, fmtX: (v) => v.toFixed(1), fmtY: (v) => v.toFixed(1), padB: 22 });
+  list.forEach((o) => { const tt = Math.min(t, tFin(o)); c1.line([{ x: 0, y: 0 }, { x: tFin(o), y: acc(o) * tFin(o) }], `${o.col}40`, 1.5); c1.line([{ x: 0, y: 0 }, { x: tt, y: acc(o) * tt }], o.col, 3); c1.dot(tt, acc(o) * tt, o.col, 5); });
+  c1.vline(Math.min(t, tmax));
+  const c2 = q.chart({ x: 4, y: hh + 8, w: q.cw - 8, h: hh }, { x0: 0.4, x1: list.length + 0.6, y0: 0, y1: 1.05, title: 'Share of the energy: moving forward (blue) and spinning (orange)', xTicks: list.length, yTicks: 4, fmtX: () => '', fmtY: (v) => `${Math.round(v * 100)}%`, padB: 8 });
+  c2.bars(list.map((o, i) => ({ x: i + 1, y: 1, color: 'rgba(255,162,74,0.85)' })), 0.55);
+  c2.bars(list.map((o, i) => ({ x: i + 1, y: 1 / (1 + o.k), color: 'rgba(79,195,247,0.9)' })), 0.55);
+  list.forEach((o, i) => c2.text(o.name.replace('Block, no friction', 'Block').replace('Solid ', 'solid ').replace('Hollow ', 'hollow '), i + 1, 0.04, { align: 'center', size: 9.5, color: '#04121c', base: 'bottom' }));
+
+  const order = list.slice().sort((a, b) => tFin(a) - tFin(b)).map((o) => o.name.toLowerCase());
+  app.explain(`${nums([['fastest', order[0]], ['last', order[order.length - 1]], ['time to the bottom: ring', `${tFin(OBJ[4]).toFixed(2)} s`], ['solid sphere', `${tFin(OBJ[1]).toFixed(2)} s`]])}
+    <p>They all start with the same energy, from the same height. As each rolls down, that energy is split between two uses: <b>moving forward</b> and <b>spinning</b>. The more of the mass is far from the middle, the more energy it takes to spin it at the speed that goes with the rolling. The ring has all its mass at the rim, so half of its energy goes into the spin. A solid sphere has most of its mass near the middle: only 2/7 of the energy goes into the spin, and 5/7 into moving forward. So the sphere speeds up faster. The block does not spin at all, so it wins, if there is no friction at all.</p>
+    <p>The acceleration is g sin θ / (1 + k), where k = I / (m r²) is 0 for the block, 2/5 for the solid sphere, 1/2 for the cylinder, 2/3 for the hollow sphere and 1 for the ring. The result does not depend on the size or the mass of any of them. The order is the same on any slope. (This is the second moment of the mass about the axis, I = Σ m r², again, now deciding a race.)</p>`);
+}
+
+// ---------- The spool ----------
+
+function drawSpool() {
+  const { phi: pd, rr } = ui.v, ph = pd * DEG, R = 1, r = rr * R;
+  const sgn = Math.sign(R * Math.cos(ph) - r) || 0;
+  const a = (3 * (Math.cos(ph) - rr)) / 1.5; // toward the puller; the tension is 3, and I_cm is 1/2 m R^2
+  const t = tr.running || tr.endedAt ? tr.t : 0;
+  if (tr.running && (Math.abs(0.5 * a * t * t) > 3.2 || t > 5)) tr.finish();
+  const x = Math.max(-3.2, Math.min(3.2, 0.5 * a * t * t));
+  const rot = -x / R; // rolling toward +x turns it clockwise
+  const p = pens[0].begin().box(-4.6, 5.6, -0.7, 2.7, 12);
+  p.line([{ x: -4.6, y: 0 }, { x: 4.6, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  for (let g = -4; g <= 4; g++) p.line([{ x: g - ((x % 1) + 1) % 1 + 0, y: 0 }, { x: g - 0.12 - (((x % 1) + 1) % 1) + 0, y: -0.13 }], 'rgba(155,231,166,0.25)', 1);
+  const c = { x, y: R };
+  p.circle(c, R, { fill: 'rgba(79,195,247,0.15)', stroke: C.ball, width: 3 });
+  p.circle(c, r, { fill: 'rgba(255,162,74,0.25)', stroke: C.ink, width: 3 });
+  for (let k = 0; k < 4; k++) p.line([c, V.add(c, V.polar(R, rot + (k * TAU) / 4))], 'rgba(255,255,255,0.3)', 1.5);
+  const tp = V.add(c, { x: r * Math.sin(ph), y: -r * Math.cos(ph) }); // where the thread leaves the axle
+  const dir = { x: Math.cos(ph), y: Math.sin(ph) };
+  p.line([tp, V.add(tp, V.mul(dir, 3.0))], '#fff', 2.5);
+  p.arrow(V.add(tp, V.mul(dir, 2.0)), V.mul(dir, 0.7), C.you, 4, 'pull');
+  // The line of the pull, carried back to the ground: the side of the contact point it meets tells the way.
+  if (Math.abs(Math.sin(ph)) > 0.02) {
+    const s0 = -tp.y / dir.y, hit = { x: tp.x + dir.x * s0, y: 0 };
+    p.line([tp, hit], 'rgba(255,255,255,0.4)', 1.4, [4, 4]);
+    p.dot(hit, '#fff', 4); p.text('the pull points at the ground here', hit, { dy: 32, size: 10.5, color: 'rgba(255,255,255,0.7)' });
+  }
+  p.dot({ x, y: 0 }, C.friend, 6); p.text('contact point', { x, y: 0 }, { dy: 16, dx: 40, size: 10.5, color: C.friend });
+  p.arrow({ x: x, y: 2.5 }, { x: sgn * 0.9, y: 0 }, sgn >= 0 ? C.ink : C.friend, 3, sgn > 0 ? 'rolls toward you' : sgn < 0 ? 'rolls away from you' : 'stays');
+  p.note(sgn > 0 ? 'The pull is low enough: the spool rolls toward you' : sgn < 0 ? 'The pull is steep: the spool rolls away from you' : 'Exactly balanced: it does not move');
+
+  const q = pens[1].begin();
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: 85, y0: -1.2, y1: 1.2, title: 'Acceleration toward you (positive) or away (negative), against the angle of the pull', xTicks: 6, yTicks: 4, fmtY: (v) => v.toFixed(1), xTitle: 'angle of the pull above the ground (degrees)' });
+  const pts = []; for (let d = 0; d <= 85; d += 1) pts.push({ x: d, y: 2 * (Math.cos(d * DEG) - rr) });
+  const crit = Math.acos(rr) / DEG;
+  ch.band(0, crit, 'rgba(255,162,74,0.1)'); ch.band(crit, 85, 'rgba(240,98,146,0.1)');
+  ch.hline(0, 'rgba(255,255,255,0.4)', [1, 0]); ch.vline(crit, 'rgba(255,255,255,0.4)');
+  ch.line(pts, C.you, 3); ch.dot(pd, a, '#fff', 6.5);
+  ch.text('rolls toward you', crit / 2, 0.95, { align: 'center', size: 11, color: C.ink }); ch.text('rolls away', (crit + 85) / 2, -0.95, { align: 'center', size: 11, color: C.friend });
+  app.explain(`${nums([['turning point at', `${crit.toFixed(0)}°`], ['this pull', sgn > 0 ? 'toward you' : sgn < 0 ? 'away' : 'neither'], ['rule', 'cos(angle) = axle / rim']])}
+    <p>The thread comes off the bottom of the axle. When the spool rolls, it turns about its <b>contact point</b> with the ground, and that is the point to use for the turning effect (the torque). The pull has a turning effect about that point of T (r − R cos θ): a low pull (cos θ larger than r / R) turns the spool clockwise, so it rolls toward you. A steep pull turns it the other way, so it rolls away from you. Look at the dashed line: it is the line along the pull. If it meets the ground on your side of the contact point, the spool rolls away. If it meets the ground on the far side, the spool rolls toward you.</p>
+    <p>A thicker axle moves the turning point lower, and a thin one moves it higher. At the turning angle, the spool does not move at all, however hard you pull. This is the toy spool, the yo-yo and the film reel: they all roll toward the string if you pull low, and away from it if you pull high.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  if (ui.v.mode === 'race') drawRace(); else drawSpool();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

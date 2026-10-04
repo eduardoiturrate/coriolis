@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>An arrow carried round a sphere · Spin</title>
+<meta name="description" content="Carry an arrow round a loop on a globe without ever turning it, and it comes back turned. The turn equals the area enclosed. A triangle with three right angles, and the Foucault pendulum." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V3, fmt, nums, TAU, DEG, clamp } = Spin;
+
+const app = Spin.app({
+  slug: 'sphere',
+  sub: 'On a flat sheet, an arrow slid round a loop comes back pointing the same way. On a globe it does not.',
+  views: [{ caption: 'The globe (drag to turn it)' }, { caption: 'The angle between the arrow and the way you are going' }],
+  go: 'Carry the arrow', speed: { min: 0.1, max: 3, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['tri', 'A triangle'], ['lat', 'Round a circle of latitude']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('dl', { label: 'Width of the triangle at the pole', min: 10, max: 170, step: 1, value: 90, fmt: (v) => `${v}°`, show: is('tri') });
+ui.slider('lat', { label: 'Latitude of the other two corners', min: 0, max: 75, step: 1, value: 0, fmt: (v) => `${v}°`, show: is('tri') });
+ui.chips([{ text: 'Three right angles', set: { dl: 90, lat: 0 } }, { text: 'Thin slice', set: { dl: 30, lat: 0 } }, { text: 'Small triangle', set: { dl: 30, lat: 60 } }], { show: is('tri') });
+ui.slider('phi', { label: 'Latitude of the circle', min: 0, max: 89, step: 1, value: 49, fmt: (v) => `${v}°`, show: is('lat') });
+ui.chips([{ text: 'The equator', set: { phi: 0 } }, { text: 'Paris (49°)', set: { phi: 49 } }, { text: 'Near the pole', set: { phi: 85 } }], { show: is('lat') });
+ui.slider('psi', { label: 'The arrow starts pointing', min: 0, max: 360, step: 5, value: 0, fmt: (v) => (v === 0 ? 'along the path' : `${v}° from the path`) });
+ui.check('ghost', 'Leave copies of the arrow along the way', true);
+
+const cam = new Spin.Cam3(pens[0], { az: 0.9, el: 0.55, dist: 5.8, fov: 34, min: 3, max: 10 });
+ui.on(() => { model = null; tr.restart(); });
+let model = null;
+
+const ll = (la, lo) => ({ x: Math.cos(la * DEG) * Math.cos(lo * DEG), y: Math.cos(la * DEG) * Math.sin(lo * DEG), z: Math.sin(la * DEG) });
+const sub = (a, b) => V3.add(a, V3.mul(b, -1));
+const along = (p, d) => V3.norm(sub(d, V3.mul(p, V3.dot(d, p))));          // direction d, made to lie in the tangent plane at p
+const signed = (t, v, p) => Math.atan2(V3.dot(V3.cross(t, v), p), V3.dot(t, v)); // angle from t to v, counterclockwise seen from outside
+
+/** The great-circle arc from a to b, without a, with n steps. */
+function arc(a, b, n) {
+  const w = Math.acos(clamp(V3.dot(a, b), -1, 1)), s = Math.sin(w), out = [];
+  for (let i = 1; i <= n; i++) { const t = i / n; out.push(s < 1e-9 ? b : V3.norm(V3.add(V3.mul(a, Math.sin((1 - t) * w) / s), V3.mul(b, Math.sin(t * w) / s)))); }
+  return out;
+}
+const steps = (a, b) => Math.max(8, Math.ceil(Math.acos(clamp(V3.dot(a, b), -1, 1)) / DEG * 1.5));
+
+function build() {
+  const { mode, dl, lat, phi, psi } = ui.v;
+  let path, corners = [];
+  if (mode === 'tri') {
+    const A = { x: 0, y: 0, z: 1 }, B = ll(lat, 0), Cc = ll(lat, dl);
+    path = [A, ...arc(A, B, steps(A, B)), ...arc(B, Cc, steps(B, Cc)), ...arc(Cc, A, steps(Cc, A))];
+    corners = [{ p: A, i: 0, n: 'A' }, { p: B, i: steps(A, B), n: 'B' }, { p: Cc, i: steps(A, B) + steps(B, Cc), n: 'C' }];
+  } else {
+    path = []; for (let k = 0; k <= 360; k++) path.push(ll(phi, k));
+  }
+  const N = path.length;
+  const tan = (i) => { const j = i < N - 1 ? i : i - 1, d = sub(path[j + 1], path[j]); return along(path[i], d); };
+  let v = V3.turn(tan(0), path[0], psi * DEG);
+  const vs = [v], ts = [tan(0)], dist = [0];
+  for (let i = 1; i < N; i++) {
+    const a = path[i - 1], b = path[i], ax = V3.cross(a, b), s = V3.len(ax);
+    if (s > 1e-12) v = V3.turn(v, V3.mul(ax, 1 / s), Math.atan2(s, V3.dot(a, b)));
+    v = along(b, v);
+    vs.push(v); ts.push(tan(i)); dist.push(dist[i - 1] + Math.acos(clamp(V3.dot(a, b), -1, 1)) / DEG);
+  }
+  // The angle between arrow and direction of travel, continuous along the path
+  const rel = []; let prev = signed(ts[0], vs[0], path[0]) / DEG; rel.push(prev);
+  for (let i = 1; i < N; i++) { let a = signed(ts[i], vs[i], path[i]) / DEG; while (a - prev > 180) a -= 360; while (a - prev < -180) a += 360; rel.push(a); prev = a; }
+  const turn = signed(vs[0], vs[N - 1], path[0]) / DEG;
+  let angles = null, excess = 0;
+  if (mode === 'tri') {
+    angles = corners.map((c, k) => {
+      const P = corners[(k + 2) % 3].p, Q = c.p, R = corners[(k + 1) % 3].p;
+      return Math.abs(signed(along(Q, sub(P, Q)), along(Q, sub(R, Q)), Q)) / DEG;
+    });
+    excess = angles.reduce((s, x) => s + x, 0) - 180;
+  }
+  model = { key: JSON.stringify(ui.v), path, vs, rel, dist, turn, corners, angles, excess, N };
+}
+
+const visible = (p) => V3.dot(p, cam.pos) > 1;
+function drawPath(pts, color, w) {
+  let run = [], vis = null;
+  const flush = () => { if (run.length > 1) cam.line(run, vis ? color : 'rgba(255,255,255,0.13)', vis ? w : 1.2, vis ? undefined : [3, 4]); };
+  for (const p of pts) { const v = visible(p); if (vis !== null && v !== vis) { flush(); run = [run[run.length - 1]]; } vis = v; run.push(p); }
+  flush();
+}
+const ring = (f) => { const pts = []; for (let k = 0; k <= 90; k++) pts.push(f((k / 90) * TAU)); return pts; };
+function globe() {
+  cam.line(ring((a) => ({ x: Math.cos(a), y: Math.sin(a), z: 0 })), 'rgba(255,255,255,0.4)', 1.5);
+  for (const la of [-60, -30, 30, 60]) cam.line(ring((a) => ({ x: Math.cos(a) * Math.cos(la * DEG), y: Math.sin(a) * Math.cos(la * DEG), z: Math.sin(la * DEG) })), 'rgba(255,255,255,0.13)', 1);
+  for (let lo = 0; lo < 180; lo += 30) cam.line(ring((a) => ({ x: Math.cos(a) * Math.cos(lo * DEG), y: Math.cos(a) * Math.sin(lo * DEG), z: Math.sin(a) })), 'rgba(255,255,255,0.13)', 1);
+  cam.dot({ x: 0, y: 0, z: 1 }, '#9be7a6', 4); cam.text('north pole', { x: 0, y: 0, z: 1.12 }, { size: 10.5, color: '#9be7a6' });
+}
+
+function draw(now) {
+  tr.step(now);
+  if (!model || model.key !== JSON.stringify(ui.v)) build();
+  const m = model, { mode } = ui.v;
+  const dur = mode === 'tri' ? 10 : 12;
+  const f = clamp(tr.t / dur, 0, 1), idx = Math.round(f * (m.N - 1));
+  if (tr.running && tr.t > dur + 1.2) tr.finish();
+  const L = 0.42;
+  pens[0].begin(); cam.begin();
+  globe();
+  drawPath(m.path, 'rgba(255,213,79,0.85)', 2.6);
+  if (mode === 'tri') for (const c of m.corners) cam.text(c.n, V3.mul(c.p, 1.1), { size: 12, color: '#ffd54f', dx: c.n === 'A' ? 22 : 0, dy: c.n === 'A' ? 10 : 0 });
+  const place = (i, color, w, label) => { const p = V3.mul(m.path[i], 1.01); if (visible(m.path[i])) cam.arrow(p, V3.mul(m.vs[i], L), color, w, label); };
+  place(0, '#ffffff', 3, 'start');
+  if (ui.v.ghost) for (let g = 1; g < 14; g++) { const i = Math.round((g / 14) * (m.N - 1)); if (i < idx - 2) place(i, 'rgba(255,138,76,0.5)', 2); }
+  place(idx, C.ink, 4, f >= 1 ? 'back at the start' : '');
+  if (visible(m.path[idx])) cam.dot(V3.mul(m.path[idx], 1.01), '#fff', 4);
+  pens[0].note(f >= 1 ? `The arrow is turned by ${Math.abs(m.turn).toFixed(0)}°` : 'Carried without turning: it keeps its angle to the surface');
+
+  const R = pens[1].begin();
+  const lo = Math.min(...m.rel) - 15, hi = Math.max(...m.rel) + 15;
+  const total = m.dist[m.N - 1];
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 0, x1: total, y0: Math.floor(lo / 30) * 30, y1: Math.ceil(hi / 30) * 30, title: 'Angle from the direction of travel to the arrow (degrees)', xTicks: 6, yTicks: 6, xTitle: 'distance travelled (degrees of arc)', fmtX: (v) => v.toFixed(0), fmtY: (v) => v.toFixed(0) });
+  ch.line(m.dist.map((d, i) => ({ x: d, y: m.rel[i] })).slice(0, idx + 1), C.ink, 3);
+  ch.dot(m.dist[idx], m.rel[idx], '#fff', 5);
+  if (mode === 'tri') for (const c of m.corners.slice(1)) ch.vline(m.dist[c.i], 'rgba(255,255,255,0.3)');
+
+  if (mode === 'tri') {
+    const share = (m.excess * DEG) / (4 * Math.PI);
+    app.explain(`${nums([['angles of the triangle', m.angles.map((x) => `${x.toFixed(0)}°`).join(' + '), `= ${(m.angles.reduce((s, x) => s + x, 0)).toFixed(0)}°`], ['more than a flat triangle (180°)', `${m.excess.toFixed(0)}°`], ['the arrow comes back turned by', `${Math.abs(m.turn).toFixed(0)}°`], ['share of the globe inside', `${(share * 100).toFixed(1)}%`]])}
+      <p>Slide an arrow along a path <b>without ever turning it</b>: at each step, keep it flat on the surface and as parallel to its last position as the surface allows. This is called <b>parallel transport</b>. On a flat sheet, the arrow comes back pointing the same way, whatever the loop. On a globe it does not.</p>
+      <p>Look at the three-right-angle triangle: down from the pole to the equator, a quarter of the way round the equator, and back up to the pole. On the straight sides (great circles), the arrow keeps the same angle to the path. That is the flat parts of the graph. It turns only at the corners, where the path turns. When the arrow gets back, it is turned by <b>exactly the excess of the angles</b> over 180°, which is the area of the triangle divided by the square of the radius. A bent surface turns the arrow, and the turn measures the bend. Try the thin slice and the small triangle: the smaller the triangle, the smaller the turn, and the flatter it looks.</p>`);
+  } else {
+    const phi = ui.v.phi, sn = Math.sin(phi * DEG);
+    app.explain(`${nums([['seen from space, the arrow comes back turned by', `${(360 * (1 - sn)).toFixed(0)}°`], ['against the ground, it turned', `${(360 * sn).toFixed(0)}°`, 'the other way'], ['a Foucault pendulum here turns once in', sn < 0.01 ? 'never' : `${(24 / sn).toFixed(1)} hours`], ['the polar cap inside is', `${(50 * (1 - sn)).toFixed(0)}%`, 'of the globe']])}
+      <p>Now walk round a circle of latitude, carrying the arrow. A circle of latitude is not a great circle (except the equator), so the path itself curves to one side, towards the pole. The arrow does not curve. The graph shows the angle between the arrow and the way you are going. It changes at a steady rate, and over the whole circle it changes by <b>360° × sin(latitude)</b>.</p>
+      <p>This is the <b>Foucault pendulum</b>. A pendulum swings in a fixed plane, which is the carried arrow. The ground below it is the path. As the Earth turns once a day, the pendulum's plane turns against the ground by 360° × sin(latitude): once a day at the pole, 272° a day in Paris (a full turn in 32 hours), and never at the equator. The cap of the globe inside the circle has an area that gives the same turn, as seen from space. It is the same fact, said two ways.</p>`);
+  }
+}
+tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

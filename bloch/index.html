@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Quantum spin · Spin</title>
+<meta name="description" content="A spin-1/2 particle as an arrow on the Bloch sphere. A magnetic field makes it precess, a resonant pulse tips it over, and a measurement gives only up or down, with a probability set by the angle." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V3, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'bloch',
+  sub: 'The spin of an electron has two states, but they can be mixed. Every mix is one arrow on a sphere.',
+  views: [{ caption: 'The Bloch sphere (drag to turn the view)' }, { caption: '' }],
+  go: 'Start', speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['precess', 'A magnetic field'], ['rabi', 'A pulse at resonance'], ['measure', 'Measuring']]);
+const is = (m) => (v) => v.mode === m;
+
+// A magnetic field
+ui.seg('part', [['e', 'Electron'], ['p', 'Proton']], { label: 'Particle', show: is('precess') });
+ui.slider('B', { label: 'Magnetic field', min: 0.2, max: 10, log: true, value: 1, fmt: (v) => `${v} tesla`, show: is('precess') });
+ui.slider('th0', { label: 'Starting angle from the field', min: 0, max: 180, step: 1, value: 60, fmt: (v) => `${v}°`, show: is('precess') });
+// A pulse
+ui.slider('om', { label: 'Strength of the pulse', min: 0.1, max: 1, step: 0.05, value: 0.5, fmt: (v) => `${v} turns a second`, show: is('rabi') });
+ui.slider('det', { label: 'Mistuning (how far the pulse is from resonance)', min: -1, max: 1, step: 0.05, value: 0, fmt: (v) => `${v} turns a second`, show: is('rabi') });
+ui.slider('T', { label: 'How long the pulse lasts', min: 0.2, max: 6, step: 0.05, value: 1, fmt: (v) => `${v} s`, show: is('rabi') });
+ui.chips([
+  { text: 'π pulse: flip', set: { om: 0.5, det: 0, T: 1 } },
+  { text: 'π/2 pulse: tip to the side', set: { om: 0.5, det: 0, T: 0.5 } },
+  { text: '2π pulse: back again', set: { om: 0.5, det: 0, T: 2 } },
+  { text: 'Mistuned', set: { om: 0.5, det: 0.5, T: 1 } },
+], { show: is('rabi') });
+// Measuring
+ui.slider('th', { label: 'The arrow, angle from up', min: 0, max: 180, step: 1, value: 60, fmt: (v) => `${v}°`, show: is('measure') });
+ui.slider('bet', { label: 'The detector points', min: 0, max: 180, step: 1, value: 0, fmt: (v) => `${v}° from up`, show: is('measure') });
+ui.chips([{ text: 'Detector up and down', set: { bet: 0 } }, { text: 'Detector sideways', set: { bet: 90 } }, { text: 'Arrow along the detector', set: { th: 0, bet: 0 } }], { show: is('measure') });
+let hits = [], anim = null, n = { up: 0, dn: 0 };
+const clear = () => { hits = []; n = { up: 0, dn: 0 }; anim = null; };
+const pUp = () => { const { th, bet } = ui.v, g = Math.acos(Math.cos(th * DEG) * Math.cos(bet * DEG) + Math.sin(th * DEG) * Math.sin(bet * DEG)); return { p: Math.cos(g / 2) ** 2, g }; };
+const land = (up) => { up ? n.up++ : n.dn++; hits.push({ up, j: Math.random(), k: Math.random() }); if (hits.length > 500) hits.shift(); };
+const fireMany = (k) => { const { p } = pUp(); for (let i = 0; i < k; i++) land(Math.random() < p); };
+ui.actions([{ text: 'Fire 10 atoms', fn: () => fireMany(10) }, { text: 'Fire 200 atoms', fn: () => fireMany(200) }, { text: 'Clear', fn: clear }], { show: is('measure') });
+ui.hint('The Go button below fires one atom and shows it fly.', { show: is('measure') });
+
+const cam = new Spin.Cam3(pens[0], { az: 0.7, el: 0.35, dist: 5.6, fov: 34, min: 3, max: 10 });
+ui.on((id) => {
+  if (id === 'mode') setup();
+  if (ui.v.mode === 'measure') { if (id !== 'mode') clear(); tr.reset(); } else tr.restart();
+});
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo(m === 'measure' ? 'Fire one atom' : 'Start');
+  app.caption(1, m === 'precess' ? 'The three sides of the arrow, against time' : m === 'rabi' ? 'The chance of finding the spin down, against time' : 'A Stern–Gerlach detector, and what it counts');
+  if (m === 'measure') { clear(); tr.reset(); }
+  trail.length = 0;
+}
+const trail = [];
+tr.onStart = () => {
+  trail.length = 0;
+  if (ui.v.mode === 'measure') anim = { up: Math.random() < pUp().p };
+};
+
+const ring = (f) => { const pts = []; for (let k = 0; k <= 72; k++) pts.push(f((k / 72) * TAU)); return pts; };
+function sphere(label = true) {
+  cam.line(ring((a) => ({ x: Math.cos(a), y: Math.sin(a), z: 0 })), 'rgba(255,255,255,0.38)', 1.6);
+  cam.line(ring((a) => ({ x: Math.cos(a), y: 0, z: Math.sin(a) })), 'rgba(255,255,255,0.15)', 1);
+  cam.line(ring((a) => ({ x: 0, y: Math.cos(a), z: Math.sin(a) })), 'rgba(255,255,255,0.15)', 1);
+  for (const z of [-0.7, 0.7]) cam.line(ring((a) => ({ x: Math.cos(a) * Math.sqrt(1 - z * z), y: Math.sin(a) * Math.sqrt(1 - z * z), z })), 'rgba(255,255,255,0.1)', 1);
+  cam.line([{ x: 0, y: 0, z: -1.2 }, { x: 0, y: 0, z: 1.2 }], 'rgba(155,231,166,0.45)', 1.3, [3, 4]);
+  if (label) {
+    cam.text('up', { x: 0, y: 0, z: 1.2 }, { dy: -10, size: 12, color: '#9be7a6' });
+    cam.text('down', { x: 0, y: 0, z: -1.2 }, { dy: 10, size: 12, color: '#9be7a6' });
+    cam.text('x', { x: 1.12, y: 0, z: 0 }, { size: 10.5, color: 'rgba(255,255,255,0.55)' });
+    cam.text('y', { x: 0, y: 1.12, z: 0 }, { size: 10.5, color: 'rgba(255,255,255,0.55)' });
+  }
+}
+const vec = (th, ph) => ({ x: Math.sin(th) * Math.cos(ph), y: Math.sin(th) * Math.sin(ph), z: Math.cos(th) });
+
+function drawPrecess() {
+  const { part, B, th0 } = ui.v;
+  const rate = 0.3 * B;                               // turns a second, as shown
+  const fReal = (part === 'e' ? 28.025e9 : 42.577e6) * B;
+  const T = 8, t = Math.min(tr.t, T);
+  if (tr.running && tr.t > T + 1) tr.finish();
+  const th = th0 * DEG, ph = TAU * rate * t;
+  const r = vec(th, ph);
+  pens[0].begin(); cam.begin();
+  sphere();
+  trail.push(r); if (trail.length > 400) trail.shift();
+  cam.line(trail, 'rgba(255,213,79,0.5)', 2);
+  cam.arrow({ x: 1.3, y: 1.3, z: -0.6 }, { x: 0, y: 0, z: 1.2 }, C.you, 3.4, 'magnetic field');
+  cam.arrow({ x: 0, y: 0, z: 0 }, r, C.ink, 4, 'the spin');
+  cam.dot(r, '#fff', 5);
+  const R = pens[1].begin();
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 0, x1: T, y0: -1, y1: 1, title: 'Side of the arrow along x (white), y (orange), up (green)', xTicks: 8, yTicks: 4, xTitle: 'time (s, slowed down)', fmtY: (v) => v.toFixed(1) });
+  const X = [], Y = [], Z = [];
+  for (let s = 0; s <= t + 1e-9; s += T / 400) { const q = vec(th, TAU * rate * s); X.push({ x: s, y: q.x }); Y.push({ x: s, y: q.y }); Z.push({ x: s, y: q.z }); }
+  ch.line(X, '#ffffff', 2.4); ch.line(Y, C.ink, 2.4); ch.line(Z, '#9be7a6', 2.4);
+  ch.dot(t, r.x, '#ffffff'); ch.dot(t, r.y, C.ink); ch.dot(t, r.z, '#9be7a6');
+  const Pz = Math.cos(th / 2) ** 2, Px = (1 + r.x) / 2;
+  const hz = fReal >= 1e9 ? `${(fReal / 1e9).toFixed(1)} GHz` : `${(fReal / 1e6).toFixed(1)} MHz`;
+  app.explain(`${nums([['precession rate', hz], ['shown at', `${rate.toFixed(2)} turns a second`], ['if you measure up or down: chance of up', `${(Pz * 100).toFixed(0)}%`, '(never changes)'], ['if you measure left or right (x): chance of the + side now', `${(Px * 100).toFixed(0)}%`]])}
+    <p>An electron or a proton has an inner spin with only two states along any axis: <b>up</b> and <b>down</b>. But it can also be in a <b>mix</b> of both, and every mix is one point on a sphere, the <b>Bloch sphere</b>. The arrow points to that point. Up and down are the poles.</p>
+    <p>A magnetic field along up makes the arrow <b>precess</b>: it turns round the field at a steady rate, like a gyroscope, with its angle to the field unchanged. This is the rate NMR and MRI machines detect: 42.6 MHz for each tesla for a proton, and 28 GHz for each tesla for an electron. The page shows it slowed down by a very large factor. The chance of <b>up</b> does not change, because the angle to the field does not change. The chance of finding it on the <b>x</b> side swings up and down, because the arrow turns away from x and back.</p>
+    <p>One strange fact: for a spin-½ particle, turning the arrow once round (360°) does not bring the full state back. The state changes sign, and comes back only after 720°. That is the same 720° as in the quaternion page.</p>`);
+}
+
+function drawRabi() {
+  const { om, det, T } = ui.v;
+  const oe = Math.hypot(om, det), k = V3.norm({ x: om, y: 0, z: det });
+  const tmax = Math.max(3, T + 1.2);
+  const t = Math.min(tr.t, tmax);
+  if (tr.running && tr.t > tmax + 0.8) tr.finish();
+  const on = Math.min(t, T);
+  const r = V3.turn({ x: 0, y: 0, z: 1 }, k, TAU * oe * on);
+  pens[0].begin(); cam.begin();
+  sphere();
+  trail.push(r); if (trail.length > 600) trail.shift();
+  cam.line(trail, 'rgba(255,213,79,0.5)', 2);
+  if (t < T) cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(k, 1.45), C.you, 3, 'the field the spin sees');
+  cam.arrow({ x: 0, y: 0, z: 0 }, r, C.ink, 4, 'the spin');
+  cam.dot(r, '#fff', 5);
+  pens[0].note(t < T ? 'The pulse is on' : 'The pulse is off');
+  const pd = (s) => { const q = Math.min(s, T); return ((om * om) / (oe * oe)) * Math.sin(Math.PI * oe * q) ** 2; };
+  const R = pens[1].begin();
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 0, x1: tmax, y0: 0, y1: 1.05, title: 'Chance of finding the spin down (it started up)', xTicks: 6, yTicks: 5, xTitle: 'time (s)', fmtY: (v) => v.toFixed(1) });
+  ch.band(0, T, 'rgba(255,213,79,0.08)');
+  const pts = []; for (let s = 0; s <= t + 1e-9; s += tmax / 500) pts.push({ x: s, y: pd(s) });
+  ch.hline((om * om) / (oe * oe), 'rgba(255,255,255,0.45)');
+  ch.line(pts, C.ink, 3); ch.dot(t, pd(t), '#fff', 5);
+  ch.text('the pulse is on', T / 2, 0.06, { align: 'center', size: 10.5, color: 'rgba(255,213,79,0.85)' });
+  const angle = 360 * oe * T;
+  const maxP = (om * om) / (oe * oe);
+  app.explain(`${nums([['turn of the arrow', `${angle.toFixed(0)}°`], ['turn needed for a flip', `${det === 0 ? (180 / (360 * om)).toFixed(2) + ' s' : 'cannot flip fully'}`], ['highest chance of down', `${(maxP * 100).toFixed(0)}%`], ['chance of down now', `${(pd(t) * 100).toFixed(0)}%`]])}
+    <p>To flip a spin, you push it with a small magnetic field that turns at the same rate as the precession. This is <b>resonance</b>. Look from a frame that turns with the precession: the strong field disappears, the small field looks still, and the arrow simply turns round it. A pulse that turns it by 180° (a <b>π pulse</b>) takes up to down. A pulse for 90° puts it on the equator, an equal mix. A 360° pulse brings it back to up.</p>
+    <p>If the pulse is <b>mistuned</b>, the field the spin sees is tilted, and the arrow circles round a tilted axis. It can never reach down: the best it can do is shown by the white line. This is why NMR and quantum computers need the pulse frequency exactly right. The same pulses are the “gates” on one qubit.</p>`);
+}
+
+function drawMeasure() {
+  const { th, bet } = ui.v;
+  const state = vec(th * DEG, 0), ax = vec(bet * DEG, 0);
+  const { p } = pUp();
+  pens[0].begin(); cam.begin();
+  sphere();
+  cam.line([V3.mul(ax, -1.25), V3.mul(ax, 1.25)], C.spin, 2.4, [6, 4]);
+  cam.text('detector +', V3.mul(ax, 1.32), { dx: 46, size: 11, color: C.spin });
+  cam.arrow({ x: 0, y: 0, z: 0 }, state, C.ink, 4, 'the arrow');
+  cam.dot(state, '#fff', 5);
+  const R = pens[1].begin();
+  const W = R.cw, H = R.ch, top = H * 0.46;
+  // The detector picture
+  const my = top / 2 + 4, x0 = W * 0.08, xm = W * 0.42, xs = W * 0.86, d = top * 0.3;
+  R.textS('source', x0, my + 22, { size: 11 });
+  const ctx = R.ctx, px = (v) => R.px(v);
+  ctx.save();
+  ctx.fillStyle = '#ffd54f'; ctx.beginPath(); ctx.arc(px(x0), px(my), px(7), 0, TAU); ctx.fill();
+  // magnet
+  ctx.fillStyle = 'rgba(239,83,80,0.55)'; ctx.beginPath(); ctx.moveTo(px(xm - 34), px(my - 8)); ctx.lineTo(px(xm + 34), px(my - 26)); ctx.lineTo(px(xm + 34), px(my - 52)); ctx.lineTo(px(xm - 34), px(my - 52)); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(79,195,247,0.55)'; ctx.beginPath(); ctx.moveTo(px(xm - 34), px(my + 8)); ctx.lineTo(px(xm + 34), px(my + 26)); ctx.lineTo(px(xm + 34), px(my + 52)); ctx.lineTo(px(xm - 34), px(my + 52)); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.setLineDash([px(4), px(5)]); ctx.lineWidth = px(1.2);
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(px(x0), px(my)); ctx.lineTo(px(xm - 20), px(my)); ctx.quadraticCurveTo(px(xm + 40), px(my), px(xs), px(my + s * d)); ctx.stroke(); }
+  ctx.setLineDash([]); ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = px(2); ctx.beginPath(); ctx.moveTo(px(xs), px(my - top * 0.42)); ctx.lineTo(px(xs), px(my + top * 0.42)); ctx.stroke();
+  ctx.restore();
+  R.textS('N', xm, my - 38, { size: 12 }); R.textS('S', xm, my + 38, { size: 12 });
+  R.textS('screen', xs, my + top * 0.42 + 10, { size: 11 });
+  for (const h of hits) { ctx.fillStyle = h.up ? C.ink : '#4fc3f7'; ctx.beginPath(); ctx.arc(px(xs + 4 + h.k * 20), px(my + (h.up ? -1 : 1) * d + (h.j - 0.5) * 22), px(2.2), 0, TAU); ctx.fill(); }
+  if (anim) {
+    const f = Math.min(1, tr.t / 1.0);
+    const x = x0 + (xs - x0) * f, s = anim.up ? -1 : 1;
+    const bend = Math.max(0, (x - (xm - 20)) / (xs - (xm - 20)));
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(px(x), px(my + s * d * bend * bend), px(5), 0, TAU); ctx.fill();
+    if (f >= 1) { land(anim.up); anim = null; tr.finish(); }
+  }
+  // The counts
+  const N = n.up + n.dn;
+  const ch = R.chart({ x: 4, y: top + 6, w: W - 8, h: H - top - 8 }, { x0: 0, x1: 2, y0: 0, y1: 1, title: 'Share of atoms found up, and down (white mark: the chance)', xTicks: 2, yTicks: 4, grid: false, padB: 22, fmtX: () => '', fmtY: (v) => `${Math.round(v * 100)}%` });
+  ch.bars([{ x: 0.5, y: N ? n.up / N : 0, color: C.ink }, { x: 1.5, y: N ? n.dn / N : 0, color: '#4fc3f7' }], 0.7);
+  ch.line([{ x: 0.15, y: p }, { x: 0.85, y: p }], '#fff', 3); ch.line([{ x: 1.15, y: 1 - p }, { x: 1.85, y: 1 - p }], '#fff', 3);
+  ch.text(`up: ${n.up}`, 0.5, 0.05, { align: 'center', size: 12, color: '#000' }); ch.text(`down: ${n.dn}`, 1.5, 0.05, { align: 'center', size: 12, color: '#000' });
+  app.explain(`${nums([['angle between arrow and detector', `${(pUp().g / DEG).toFixed(0)}°`], ['chance of up', `${(p * 100).toFixed(1)}%`, 'cos²(angle ÷ 2)'], ['atoms fired', String(N)], ['found up', N ? `${(100 * n.up / N).toFixed(1)}%` : '–']])}
+    <p>A <b>Stern–Gerlach detector</b> is a magnet that pushes an atom up or down, depending on its spin along the magnet. You never see anything in between. Even if the arrow points halfway, each atom is found either fully up or fully down. The arrow only sets the <b>chance</b>: it is cos² of half the angle between the arrow and the detector. At 90° the chance is 50%. At 0° it is 100%, and at 180° it is 0%.</p>
+    <p>Fire many atoms, all prepared the same way. The share found up comes close to the white mark, and gets closer the more atoms you fire. A single atom has no more information than the chance. Turn the detector, and the same atoms give a new split. After a measurement, the atom is left pointing along the detector, in whichever direction it was found: the old arrow is gone.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'precess') drawPrecess(); else if (m === 'rabi') drawRabi(); else drawMeasure();
+}
+setup(); tr.restart();
+if (ui.v.mode === 'measure') tr.reset();
+Spin.run(draw);
+</script>
+</body>
+</html>

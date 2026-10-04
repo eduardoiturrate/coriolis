@@ -38,6 +38,10 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
   matrices), and a spinning coin (Moffatt's finite-time singularity, with sound).
 - `rolling`: a point on a rolling wheel (hub, rim, flange), slipping and skidding, and the turning
   point. The cycloid, 8R long, with an area of 3πR².
+- `magnus`: why a spinning ball curves. Spin axis × velocity gives the push: a free kick, a curveball,
+  a topspin lob, a golf drive, with drag and a "no spin" path to compare.
+- `race`: a ring, a disk, a cylinder and a sphere race down a slope (the shape of the mass decides
+  the winner, not the mass), and a spool pulled by a thread rolls toward you or away from you.
 
 **Orbits and gravity**
 
@@ -50,6 +54,8 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
 - `inclination`: how the launch heading and the latitude decide the tilt of an orbit,
   cos i = sin A · cos φ. (From the former `orbit-tilt` page.)
 - `tides`: two tides a day, spring and neap tides with the Sun, and tidal locking.
+- `day`: why a solar day is longer than a sidereal day (3 min 56 s on Earth), a day on Mercury and
+  Venus, and the 25,772-year turn of Earth's axis (precession of the equinoxes, with the pole stars).
 
 **Moving observers**
 
@@ -71,6 +77,8 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
 
 - `charged`: a charge in a magnetic field, the E×B drift (the same in the lab and in the drift
   frame), and a particle trapped in Earth's field (mirror points and drift).
+- `bloch`: quantum spin as an arrow on the Bloch sphere. Precession in a magnetic field, a resonant
+  pulse (π and π/2 pulses, mistuning), and Stern–Gerlach measurement with counts.
 - `induction`: a magnet and a coil (in the frame of each), a generator, and a magnet falling through
   a copper tube.
 
@@ -86,6 +94,15 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
   and the quaternion going through −1 after 360° and back to +1 after 720°.
 - `spirograph`: a toothed wheel rolling inside or outside a ring. The pen is two turning arrows, and
   the teeth decide the petals and when the curve closes.
+- `sphere`: carry an arrow round a loop on a globe without turning it. It comes back turned by the
+  angle excess of the triangle, or by 360° × sin(latitude) round a circle (the Foucault pendulum).
+
+**Machines and signals**
+
+- `gears`: gear ratios (speed against torque, idlers), planetary gears with the Willis equation (a
+  gear train seen from a turning frame), and a car differential in a bend.
+- `wagon`: wheels on film that seem to run backward or stand still, and the same aliasing in any
+  sampled signal (the Nyquist limit).
 
 ## How it is built
 

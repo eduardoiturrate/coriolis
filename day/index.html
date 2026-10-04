@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>What is a day? · Spin</title>
+<meta name="description" content="Why a solar day is four minutes longer than a sidereal day, why a day on Venus is 117 Earth days and on Mercury two years, and how Earth's axis slowly turns round in space (the precession of the equinoxes)." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, V3, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'day',
+  sub: 'A planet spins and goes round its Sun at the same time. A day by the Sun is not a day by the stars.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', speed: { min: 0.1, max: 3, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['day', 'Days by the Sun and by the stars'], ['gyro', 'Earth’s axis turns']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('spin', { label: 'Time to spin once, against the stars', min: 0.3, max: 300, log: true, value: 0.9973, fmt: (v) => `${v} ${v === 1 ? 'day' : 'days'}`, show: is('day') });
+ui.check('retro', 'Spins the other way (backward)', false, { show: is('day') });
+ui.slider('year', { label: 'Length of the year', min: 4, max: 1000, log: true, value: 365.25, fmt: (v) => `${v} days`, show: is('day') });
+ui.chips([
+  { text: 'Earth', set: { spin: 0.9973, year: 365.25, retro: false } },
+  { text: 'Mars', set: { spin: 1.026, year: 687, retro: false } },
+  { text: 'Mercury', set: { spin: 58.65, year: 87.97, retro: false } },
+  { text: 'Venus', set: { spin: 243, year: 224.7, retro: true } },
+  { text: 'The Moon', set: { spin: 27.32, year: 27.32, retro: false } },
+  { text: 'Toy: a year of 8 days', set: { spin: 1, year: 8, retro: false } },
+], { show: is('day') });
+ui.slider('yr', { label: 'The year', min: -10000, max: 20000, step: 50, value: 2000, fmt: (v) => (v < 0 ? `${-v} BC` : `${v} AD`), show: is('gyro') });
+ui.chips([{ text: 'Thuban (Egypt)', set: { yr: -2800 } }, { text: 'Now: Polaris', set: { yr: 2000 } }, { text: 'Alderamin', set: { yr: 7500 } }, { text: 'Vega', set: { yr: 13700 } }], { show: is('gyro') });
+
+const cam = new Spin.Cam3(pens[0], { az: 0.6, el: 0.35, dist: 11, fov: 34, min: 5, max: 20 });
+ui.on((id) => { if (id === 'mode') setup(); if (id !== 'yr') tr.restart(); else tr.reset(); });
+function setup() {
+  const m = ui.v.mode;
+  cam.setActive(m === 'gyro');
+  tr.setGo(m === 'day' ? 'Restart' : 'Turn the axis');
+  app.caption(0, m === 'day' ? 'Looking down on the planet and the Sun' : 'The axis of the Earth against the stars (drag to turn the view)');
+  app.caption(1, m === 'day' ? 'How far round the star and the Sun are from overhead' : 'How near the axis points to each star, against the year');
+}
+
+// ---------- A day by the stars and by the Sun ----------
+
+function drawDay() {
+  const { spin, retro, year } = ui.v, s = retro ? -1 : 1;
+  const ws = (s * TAU) / spin, wo = TAU / year;           // radians a day
+  const sidereal = spin, relRate = ws - wo;
+  const solar = Math.abs(relRate) < 1e-9 ? Infinity : TAU / Math.abs(relRate);
+  const scaleDays = Math.min(spin, Number.isFinite(solar) ? solar : spin);
+  const rate = scaleDays / 4;                               // days a second
+  const t = tr.t * rate;
+  const a = wo * t, th = Math.PI + ws * t;                    // planet angle round the Sun, and the spin angle of the observer
+  const psi = Math.PI + 0;                                    // the direction of the star, from the planet at the start
+  const L = pens[0].begin().box(-1.7, 1.7, -1.7, 1.7, 8);
+  L.circle({ x: 0, y: 0 }, 1, { stroke: 'rgba(255,255,255,0.18)', width: 1.4, dash: [3, 5] });
+  L.circle({ x: 0, y: 0 }, 0.13, { fill: '#ffd54f', stroke: '#fff', width: 1.5 });
+  const pos = V.polar(1, a);
+  L.line([pos, { x: 0, y: 0 }], 'rgba(255,213,79,0.5)', 1.6, [4, 4]);
+  L.arrow(pos, V.polar(0.8, psi), 'rgba(255,255,255,0.45)', 1.6, '');
+  L.text('a distant star', V.add(pos, V.polar(1.0, psi)), { size: 10.5, color: 'rgba(255,255,255,0.7)', dy: -10 });
+  L.circle(pos, 0.2, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  const mk = V.add(pos, V.polar(0.2, th));
+  L.line([pos, V.add(pos, V.polar(0.42, th))], C.ink, 3);
+  L.dot(mk, C.ink, 6.5);
+  L.text('you', V.add(pos, V.polar(0.55, th)), { size: 11, color: C.ink });
+  const dsun = ((th - (a + Math.PI)) % TAU + TAU) % TAU, dstar = ((th - psi) % TAU + TAU) % TAU;
+  const near = (x) => Math.min(x, TAU - x) < 0.12;
+  if (near(dsun)) L.text('noon: the Sun is overhead', pos, { dy: -44, size: 11.5, color: C.spin });
+  if (near(dstar)) L.text('the star is overhead', pos, { dy: 44, size: 11.5, color: '#fff' });
+  L.note(`${s > 0 ? 'The planet turns counterclockwise' : 'The planet turns clockwise'}, and goes round the Sun counterclockwise`);
+
+  const Wd = 2.4 * Math.max(sidereal, Number.isFinite(solar) ? solar : sidereal);
+  const R = pens[1].begin();
+  const tt = Math.min(t, Wd);
+  if (tr.running && t > Wd + 0.5 * Wd / 2.4) tr.finish();
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 0, x1: Wd, y0: 0, y1: 360, title: 'Angle turned since the star (white) and the Sun (yellow) were overhead (degrees)', xTicks: 6, yTicks: 4, fmtX: (v) => (v >= 100 ? v.toFixed(0) : v.toFixed(1)), xTitle: 'time (days)' });
+  const star = [], sun = [];
+  const seg = (f) => { const out = []; let cur = []; let prev = null; for (let d = 0; d <= tt + 1e-9; d += Wd / 900) { const v = ((f(d) % TAU) + TAU) % TAU / DEG; if (prev !== null && Math.abs(v - prev) > 180) { out.push(cur); cur = []; } cur.push({ x: d, y: v }); prev = v; } out.push(cur); return out; };
+  seg((d) => ws * d).forEach((p) => ch.line(p, '#fff', 2.4));
+  seg((d) => relRate * d).forEach((p) => ch.line(p, C.spin, 2.4));
+  ch.vline(tt);
+
+  const perYear = (s * year) / spin - 1;
+  const days = Number.isFinite(solar) ? solar : NaN;
+  const diff = Number.isFinite(solar) ? Math.abs(solar - sidereal) : NaN;
+  const hms = (d) => (d < 3 ? `${Math.floor(d * 24)} h ${Math.round(((d * 24) % 1) * 60)} min` : `${d.toFixed(d < 100 ? 1 : 0)} days`);
+  app.explain(`${nums([['one turn against the stars', hms(sidereal)], ['from noon to noon (the solar day)', Number.isFinite(solar) ? hms(solar) : 'never: it is always the same noon'], ['the solar day is longer by', Number.isFinite(diff) ? (diff < 3 ? `${(diff * 24 * 60).toFixed(1)} min` : `${diff.toFixed(1)} days`) : '–'], ['sunrises in one year', Number.isFinite(solar) ? Math.abs(perYear).toFixed(2) : '0']])}
+    <p>There are two ways to count a day. A <b>sidereal day</b> is the time to spin once, so that a distant star is overhead again (the white line comes back to zero). But during that turn, the planet has also moved a little along its orbit, so the Sun has moved against the stars. The planet must turn a little <b>more</b> to bring the Sun overhead again. That is the <b>solar day</b>, from noon to noon (the yellow line). For Earth the extra is about 1° a day, which takes <b>3 minutes 56 seconds</b>. Over a year, this adds up to exactly one turn: the Earth turns 366.25 times, but the Sun rises only 365.25 times.</p>
+    <p>Try the other worlds. <b>Mercury</b> turns 1.5 times in its year, so from one noon to the next is <b>two Mercury years</b> (176 days). <b>Venus</b> turns backward and very slowly, so its Sun rises in the west, and noon to noon takes only 117 days, much shorter than its 243-day turn. A planet that spins once a year, like the Moon seen from Earth, keeps the same noon forever. Use the toy year of 8 days to see the effect without waiting.</p>`);
+}
+
+// ---------- Earth's axis turns ----------
+// Earth's axis turns round the sky once in about 25,772 years: a gyroscope pushed by the Moon and the Sun on Earth's bulge.
+
+const OBL = 23.439 * DEG, PERIOD = 25772;
+const eq2ecl = (ra, dec) => { const x = Math.cos(dec) * Math.cos(ra), y = Math.cos(dec) * Math.sin(ra), z = Math.sin(dec); return V3.norm({ x, y: y * Math.cos(OBL) + z * Math.sin(OBL), z: -y * Math.sin(OBL) + z * Math.cos(OBL) }); };
+const STARS = [
+  { n: 'Thuban', ra: 211.10, dec: 64.38 }, { n: 'Errai', ra: 354.84, dec: 77.63 }, { n: 'Polaris', ra: 37.95, dec: 89.26 },
+  { n: 'Alderamin', ra: 319.64, dec: 62.59 }, { n: 'Deneb', ra: 310.36, dec: 45.28 }, { n: 'Vega', ra: 279.23, dec: 38.78 },
+].map((s, i) => ({ ...s, v: eq2ecl(s.ra * DEG, s.dec * DEG), col: ['#ffd54f', '#9be7a6', '#ffffff', '#f06292', '#ff8a66', '#4fc3f7'][i] }));
+const poleAt = (yr) => { const lon = 90 * DEG - ((yr - 2000) * TAU) / PERIOD; return V3.norm({ x: Math.cos(OBL === 0 ? 0 : (90 * DEG - OBL)) * Math.cos(lon), y: Math.cos(90 * DEG - OBL) * Math.sin(lon), z: Math.sin(90 * DEG - OBL) }); };
+let yearNow = 2000;
+function drawGyro(dt) {
+  if (tr.running && !tr.paused) yearNow += dt * 2600;
+  if (tr.running && yearNow > ui.v.yr + 26000) tr.finish();
+  const yr = tr.running || tr.endedAt ? yearNow : ui.v.yr;
+  pens[0].begin(); cam.begin();
+  const pole = poleAt(yr);
+  const ring = []; for (let k = 0; k <= 80; k++) { const q = (k / 80) * TAU; ring.push({ x: 2.2 * Math.cos(q), y: 2.2 * Math.sin(q), z: 0 }); }
+  cam.line(ring, 'rgba(255,213,79,0.4)', 1.6); cam.text('the plane of the orbit', { x: 0, y: -2.2, z: 0 }, { dx: 0, dy: 16, size: 10.5, color: 'rgba(255,213,79,0.8)' });
+  const cone = []; for (let k = 0; k <= 80; k++) { const lon = (k / 80) * TAU, b = 90 * DEG - OBL; cone.push(V3.mul({ x: Math.cos(b) * Math.cos(lon), y: Math.cos(b) * Math.sin(lon), z: Math.sin(b) }, 2.6)); }
+  cam.line(cone, 'rgba(255,255,255,0.3)', 1.4, [4, 4]);
+  // The Earth, as a ball with its axis.
+  const eq = []; const nx = V3.norm(V3.cross({ x: 0, y: 0, z: 1 }, pole)), ny = V3.cross(pole, nx);
+  for (let k = 0; k <= 60; k++) { const q = (k / 60) * TAU; eq.push(V3.add(V3.mul(nx, 0.8 * Math.cos(q)), V3.mul(ny, 0.8 * Math.sin(q)))); }
+  cam.line(eq, '#4fc3f7', 2.4);
+  cam.line([V3.mul(pole, -1.0), V3.mul(pole, 3.1)], '#fff', 2.4);
+  cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(pole, 2.9), C.ink, 3.4, 'the axis');
+  cam.line([{ x: 0, y: 0, z: -2 }, { x: 0, y: 0, z: 2.8 }], 'rgba(255,255,255,0.15)', 1, [3, 4]);
+  for (const s of STARS) { const p = V3.mul(s.v, 3.0); cam.dot(p, s.col, 5); cam.text(s.n, p, { dx: 18, dy: -10, size: 11, color: s.col }); }
+  let best = null, bd = 1e9; for (const s of STARS) { const d = Math.acos(Math.max(-1, Math.min(1, V3.dot(pole, s.v)))) / DEG; if (d < bd) { bd = d; best = s; } }
+  pens[0].note(`The pole star in ${yr < 0 ? -yr + ' BC' : Math.round(yr) + ' AD'}: ${bd < 10 ? best.n : 'none close'}`);
+
+  const R = pens[1].begin();
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: -8000, x1: 20000, y0: 0, y1: 60, title: 'Angle between the axis and each star (degrees), against the year', xTicks: 7, yTicks: 6, fmtX: (v) => (v < 0 ? `${-v} BC` : `${v}`), fmtY: (v) => v.toFixed(0), xTitle: 'year' });
+  for (const s of STARS) { const pts = []; for (let y = -8000; y <= 20000; y += 100) pts.push({ x: y, y: Math.acos(Math.max(-1, Math.min(1, V3.dot(poleAt(y), s.v)))) / DEG }); ch.line(pts, `${s.col}aa`, 2); ch.text(s.n, pts.reduce((m, q) => (q.y < m.y ? q : m)).x, 3, { align: 'center', size: 10, color: s.col, base: 'bottom' }); }
+  ch.vline(yr, '#fff');
+  app.explain(`${nums([['pole star now', bd < 10 ? best.n : 'none'], ['angle to it', `${bd.toFixed(1)}°`], ['one full turn of the axis', `${PERIOD.toLocaleString('en-US')}`, 'years'], ['tilt of the axis (stays the same)', `${(OBL / DEG).toFixed(1)}°`]])}
+    <p>Earth's axis is tilted by 23.4° to the plane of its orbit, and the tilt stays the same. But the <b>direction</b> of the tilt, against the stars, turns slowly round a cone, once in 25,772 years. This is <b>precession</b>, and it is the gyroscope again. Earth bulges at the equator, and the Moon and the Sun pull on the bulge, trying to straighten Earth's axis up. A spinning body does not tip over. As you saw with the gyroscope page, the pull makes the axis sweep round a cone instead.</p>
+    <p>So the pole star changes. Four and a half thousand years ago the axis pointed near <b>Thuban</b>, and the Egyptians used it. Now it points close to <b>Polaris</b>, within 1° of it. In 7,500 years it will be near <b>Alderamin</b>, and in 13,700 years the very bright <b>Vega</b> will be the pole star. Press Turn the axis to watch it. The yellow ring is the orbit: the axis keeps its tilt to it all the time.</p>`);
+}
+
+let lastT = performance.now();
+function draw(now) {
+  const real = Math.min(0.1, (now - lastT) / 1000) * tr.speed; lastT = now;
+  tr.step(now);
+  if (ui.v.mode === 'day') drawDay(); else drawGyro(real);
+}
+tr.onStart = () => { yearNow = ui.v.yr; };
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

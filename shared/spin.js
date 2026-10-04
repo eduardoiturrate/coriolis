@@ -126,7 +126,7 @@
 
   // ---------- The list of explainers ----------
 
-  const GROUPS = ['Rotating frames', 'Rotating bodies', 'Orbits and gravity', 'Moving observers', 'Waves and oscillation', 'Fields and charges', 'The math of turning'];
+  const GROUPS = ['Rotating frames', 'Rotating bodies', 'Orbits and gravity', 'Moving observers', 'Waves and oscillation', 'Fields and charges', 'The math of turning', 'Machines and signals'];
   const TOPICS = [
     { slug: 'coriolis', group: 0, title: 'Coriolis effect', blurb: 'A thrown ball flies straight, but the ground under it turns. A roundabout, a space station, cannon shells, storms, trade winds and a pendulum.' },
     { slug: 'centrifugal', group: 0, title: 'Centrifugal force', blurb: 'A ball on a string, water in a spinning bucket, and a ride that pins you to the wall. Is the outward force real?' },
@@ -155,6 +155,13 @@
     { slug: 'rotvec', group: 6, title: 'Rotating arrows and the cross product', blurb: 'The speed of a turning arrow is ω × r. The cross product, and where the Coriolis term comes from.' },
     { slug: 'rot3d', group: 6, title: '3D rotations', blurb: 'Turns in 3D do not commute. Gimbal lock, one axis for any rotation, and why 720° brings you back.' },
     { slug: 'spirograph', group: 6, title: 'Spirograph', blurb: 'A circle rolling inside or around another circle draws a rosette. The numbers of teeth decide how it closes.' },
+    { slug: 'magnus', group: 1, title: 'Spinning balls', blurb: 'Why a spinning ball curves: top-spin, back-spin and side-spin. A free kick, a curveball, a tennis lob, a golf drive.' },
+    { slug: 'race', group: 1, title: 'Rolling race and the spool', blurb: 'A ring, a disk and a sphere roll down a slope: who wins, and why. Which way does a spool roll when you pull its thread?' },
+    { slug: 'day', group: 2, title: 'What is a day?', blurb: 'The four minutes between a sidereal and a solar day, a day on Venus and on Mercury, and the slow wobble of Earth\u2019s axis.' },
+    { slug: 'bloch', group: 5, title: 'Quantum spin', blurb: 'A spin-\u00bd particle is an arrow on a sphere. A magnetic field makes it precess, a pulse tips it, and a measurement gives only up or down.' },
+    { slug: 'sphere', group: 6, title: 'An arrow carried round a sphere', blurb: 'Carry an arrow round a loop on a globe without turning it, and it comes back turned. The Foucault pendulum does this.' },
+    { slug: 'gears', group: 7, title: 'Gears and differentials', blurb: 'Gear ratios, planetary gears as rotating frames, and why the two wheels of a turning car need a differential.' },
+    { slug: 'wagon', group: 7, title: 'Wagon wheels on film', blurb: 'Why wheels seem to turn slowly, stand still or run backward on video. A wheel seen at a few frames a second.' },
   ];
 
   // Small pictures for the home page and the menu. Each fits a 64 by 64 box.
@@ -170,6 +177,13 @@
     rotvec: ic(`<ellipse cx="32" cy="38" rx="22" ry="9" stroke="${A}"/><path d="M32 56V8M25 15l7-7 7 7" stroke="${W}"/><path d="M54 38l-5-8M54 38l-9 1" stroke="${B}"/>`),
     rot3d: ic(`<path d="M14 22l18-9 18 9v20l-18 9-18-9z" stroke="${A}"/><path d="M14 22l18 9 18-9M32 31v20" stroke="${A}"/><path d="M52 12a22 22 0 0 1 4 12M52 12h-8" stroke="${B}"/>`),
     spirograph: ic(`<ellipse cx="32" cy="32" rx="24" ry="9" stroke="${B}"/><ellipse cx="32" cy="32" rx="24" ry="9" transform="rotate(60 32 32)" stroke="${A}"/><ellipse cx="32" cy="32" rx="24" ry="9" transform="rotate(120 32 32)" stroke="${G}"/>`),
+    magnus: ic(`<circle cx="18" cy="42" r="8" stroke="${W}"/><path d="M12 38a7 7 0 0 1 12 0" stroke="${A}"/><path d="M28 36C38 12 52 10 60 18" stroke="${B}" stroke-dasharray="2 4"/><path d="M52 12l8 6-9 3" stroke="${B}"/>`),
+    race: ic(`<path d="M6 18L58 50H6z" stroke="${W}"/><circle cx="22" cy="25" r="5" stroke="${A}"/><circle cx="38" cy="35" r="5" stroke="${B}"/><circle cx="14" cy="42" r="4" stroke="${G}"/>`),
+    day: ic(`<circle cx="32" cy="32" r="12" stroke="${A}"/><path d="M32 32V20" stroke="${B}"/><path d="M6 32h10M48 32h10M32 6v10M32 48v10M14 14l7 7M43 43l7 7M50 14l-7 7M21 43l-7 7" stroke="${Y}"/>`),
+    bloch: ic(`<circle cx="32" cy="32" r="22" stroke="${W}"/><ellipse cx="32" cy="32" rx="22" ry="7" stroke="${W}" stroke-dasharray="3 4"/><path d="M32 6v52" stroke="${A}" stroke-dasharray="2 4"/><path d="M32 32L47 14" stroke="${B}"/><path d="M40 13h8v8" stroke="${B}"/>`),
+    sphere: ic(`<circle cx="32" cy="32" r="22" stroke="${W}"/><path d="M32 10C22 22 22 42 32 54" stroke="${A}"/><path d="M32 10C44 20 50 28 54 32" stroke="${A}"/><path d="M32 54C44 46 50 38 54 32" stroke="${A}" stroke-dasharray="3 3"/><path d="M32 12l7 8" stroke="${B}"/>`),
+    gears: ic(`<circle cx="24" cy="36" r="15" stroke="${A}" stroke-dasharray="4 3" stroke-width="5"/><circle cx="24" cy="36" r="5" stroke="${A}"/><circle cx="47" cy="22" r="9" stroke="${B}" stroke-dasharray="3 3" stroke-width="4"/>`),
+    wagon: ic(`<circle cx="32" cy="32" r="22" stroke="${W}"/><path d="M32 10v44M10 32h44M16 16l32 32M48 16L16 48" stroke="${W}" stroke-width="1.6"/><path d="M52 14a24 24 0 0 1 4 12M52 14h-8" stroke="${B}"/>`),
     lagrange: ic(`<circle cx="22" cy="34" r="11" stroke="${Y}"/><circle cx="48" cy="34" r="4" stroke="${A}"/><circle cx="35" cy="14" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="54" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="58" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="4" cy="34" r="2.5" fill="${B}" stroke="none"/>`),
     gyroscope: ic(`<ellipse cx="38" cy="26" rx="16" ry="8" transform="rotate(-20 38 26)" stroke="${A}"/><path d="M8 54l22-22" stroke="${W}"/><path d="M12 12c6-4 14-4 20 0" stroke="${B}"/><path d="M28 8l4 4-5 3" stroke="${B}"/>`),
     momentum: ic(`<circle cx="32" cy="32" r="5" fill="${W}" stroke="none"/><path d="M32 32L12 22M32 32L52 42" stroke="${W}"/><circle cx="12" cy="22" r="4" fill="${A}" stroke="none"/><circle cx="52" cy="42" r="4" fill="${A}" stroke="none"/><path d="M52 14a24 24 0 0 0-20-6" stroke="${B}"/><path d="M52 6v8h-8" stroke="${B}"/>`),

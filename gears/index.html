@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gears and differentials · Spin</title>
+<meta name="description" content="Gear ratios trade speed for torque. A planetary gear set is a gear train seen from a turning frame (the Willis equation). A car differential lets the two wheels turn at different speeds in a bend." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'gears',
+  sub: 'Gears are rotation handed from one wheel to the next. The teeth must pass at the same rate on both.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', speed: { min: 0.1, max: 2, value: 1, step: 0.05 }, autostart: true,
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['train', 'A gear train'], ['planet', 'Planetary gears'], ['diff', 'Car differential']]);
+const is = (m) => (v) => v.mode === m;
+
+// A gear train
+ui.slider('na', { label: 'Teeth on the driving gear (orange)', min: 8, max: 48, step: 1, value: 12, show: is('train') });
+ui.slider('nb', { label: 'Teeth on the driven gear (blue)', min: 8, max: 48, step: 1, value: 30, show: is('train') });
+ui.slider('wa', { label: 'Speed of the driving gear', min: 0.1, max: 1.5, step: 0.05, value: 0.5, fmt: (v) => `${v} turns a second`, show: is('train') });
+ui.check('idler', 'Put a gear between them (an idler)', false, { show: is('train') });
+ui.chips([{ text: 'Slow down 2.5 times', set: { na: 12, nb: 30 } }, { text: 'Speed up', set: { na: 36, nb: 12 } }, { text: 'Same size', set: { na: 20, nb: 20 } }], { show: is('train') });
+// Planetary gears
+ui.slider('ns', { label: 'Teeth on the sun (middle)', min: 12, max: 36, step: 1, value: 24, show: is('planet') });
+ui.slider('np', { label: 'Teeth on each planet', min: 9, max: 24, step: 1, value: 12, show: is('planet') });
+ui.seg('held', [['ring', 'Ring'], ['carrier', 'Carrier'], ['sun', 'Sun']], { label: 'Hold still', value: 'ring', show: is('planet') });
+ui.seg('drive', [['sun', 'Sun'], ['carrier', 'Carrier'], ['ring', 'Ring']], { label: 'Turn by hand', value: 'sun', show: is('planet') });
+ui.slider('win', { label: 'Speed of the part you turn', min: 0.1, max: 1.5, step: 0.05, value: 0.5, fmt: (v) => `${v} turns a second`, show: is('planet') });
+ui.chips([
+  { text: 'Big slow-down (ring held)', set: { held: 'ring', drive: 'sun' } },
+  { text: 'Reverse (carrier held)', set: { held: 'carrier', drive: 'sun' } },
+  { text: 'Speed up (ring held)', set: { held: 'ring', drive: 'carrier' } },
+  { text: 'Both turn the same way (sun held)', set: { held: 'sun', drive: 'ring' } },
+], { show: is('planet') });
+// Differential
+ui.slider('R', { label: 'Radius of the bend', min: 4, max: 30, step: 0.5, value: 8, fmt: (v) => `${v} m`, show: is('diff') });
+ui.slider('v', { label: 'Speed of the car', min: 2, max: 20, step: 0.5, value: 8, fmt: (v) => `${v} m/s (${(v * 3.6).toFixed(0)} km/h)`, show: is('diff') });
+ui.check('locked', 'Lock the axle (no differential): both wheels turn together', false, { show: is('diff') });
+
+const tooth = 1;
+/** Outline of an outside gear of N teeth, with pitch radius r, turned by th. */
+function gear(c, r, N, th, internal) {
+  const p = TAU / N, pts = [];
+  for (let i = 0; i < N; i++) {
+    const b = th + i * p;
+    const rr = internal ? [r + 1.2, r - tooth] : [r - 1.2, r + tooth];
+    for (const [rad, da] of [[rr[0], -0.28], [rr[1], -0.15], [rr[1], 0.15], [rr[0], 0.28]]) pts.push({ x: c.x + rad * Math.cos(b + da * p), y: c.y + rad * Math.sin(b + da * p) });
+  }
+  return pts;
+}
+function toothMark(pen, c, r, N, th, color, internal) {
+  const p = TAU / N, b = th, rr = internal ? [r + 1.2, r - tooth] : [r - 1.2, r + tooth];
+  pen.poly([-0.28, -0.15, 0.15, 0.28].map((da, k) => ({ x: c.x + (k === 0 || k === 3 ? rr[0] : rr[1]) * Math.cos(b + da * p), y: c.y + (k === 0 || k === 3 ? rr[0] : rr[1]) * Math.sin(b + da * p) })), { fill: color });
+}
+const col = { a: '#ff9a3c', b: '#4fc3f7', i: '#9aa7b6', ring: '#7d8794' };
+function drawGear(pen, c, r, N, th, color, o = {}) {
+  pen.poly(gear(c, r, N, th, false), { fill: `${color}55`, stroke: color, width: 1.6 });
+  toothMark(pen, c, r, N, th, color);
+  pen.circle(c, r * 0.28, { stroke: color, width: 1.4 });
+  pen.line([c, { x: c.x + (r - 2) * Math.cos(th + Math.PI / N), y: c.y + (r - 2) * Math.sin(th + Math.PI / N) }], color, 2.2);
+}
+
+// ---------- A gear train ----------
+
+let phA = 0, phS = 0, phC = 0, carA = 0, dists = [0, 0, 0, 0];
+tr.onStart = () => { phA = 0; phS = 0; phC = 0; carA = 0; dists = [0, 0, 0, 0]; };
+function drawTrain() {
+  const { na, nb, wa, idler } = ui.v, ni = 20;
+  phA += tr.dt * wa * TAU;
+  const rA = na / 2, rB = nb / 2, rI = ni / 2;
+  const thA = phA;
+  const thI = Math.PI - Math.PI / ni - (thA * na) / ni;
+  const thB = idler ? Math.PI - Math.PI / nb - (thI * ni) / nb : Math.PI - Math.PI / nb - (thA * na) / nb;
+  const cA = { x: 0, y: 0 }, cI = { x: rA + rI, y: 0 }, cB = { x: idler ? rA + 2 * rI + rB : rA + rB, y: 0 };
+  const hy = Math.max(rA, rB, idler ? rI : 0) + 3;
+  const L = pens[0].begin().box(-rA - 3, cB.x + rB + 3, -hy, hy, 10);
+  if (idler) drawGear(L, cI, rI, ni, thI, col.i);
+  drawGear(L, cA, rA, na, thA, col.a);
+  drawGear(L, cB, rB, nb, thB, col.b);
+  const ratio = nb / na, wb = (wa / ratio) * (idler ? 1 : -1);
+  L.text(`${na} teeth`, { x: 0, y: -rA - 2.5 }, { size: 12, color: col.a });
+  L.text(`${nb} teeth`, { x: cB.x, y: -rB - 2.5 }, { size: 12, color: col.b });
+  if (idler) L.text(`${ni} teeth`, { x: cI.x, y: -rI - 2.5 }, { size: 12, color: col.i });
+  L.note(`The driven gear turns ${idler ? 'the same way as' : 'against'} the driving gear`);
+
+  const tmax = 10;
+  if (tr.t > tmax) tr.restart();
+  const t = Math.min(tr.t, tmax);
+  const R = pens[1].begin();
+  const top = Math.max(wa, Math.abs(wb)) * tmax * 1.1;
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 0, x1: tmax, y0: -top, y1: top, title: 'Turns made, against time: driving gear (orange), driven gear (blue)', xTicks: 5, yTicks: 6, xTitle: 'time (s)', fmtY: (v) => v.toFixed(0) });
+  ch.hline(0, 'rgba(255,255,255,0.3)', [1, 0]);
+  ch.line([{ x: 0, y: 0 }, { x: t, y: wa * t }], col.a, 3); ch.line([{ x: 0, y: 0 }, { x: t, y: wb * t }], col.b, 3);
+  ch.dot(t, wa * t, col.a, 5); ch.dot(t, wb * t, col.b, 5);
+  const tq = ratio;
+  app.explain(`${nums([['speed ratio (driven ÷ driving)', `${(1 / ratio).toFixed(2)}`], ['driven gear turns at', `${Math.abs(wb).toFixed(2)} turns a second`], ['turning force (torque) on the driven gear', `× ${tq.toFixed(2)}`], ['teeth passing the contact each second', `${(wa * na).toFixed(1)}`, 'on both']])}
+    <p>Where two gears meet, the teeth pass the contact point at the same rate on both. So a gear with 12 teeth driving a gear with 30 teeth makes 30 ÷ 12 = 2.5 turns for each turn of the big one. The speed is divided by the ratio of the teeth.</p>
+    <p>Power is speed times torque, and a gear loses very little of it. So when the speed goes down by 2.5, the <b>turning force goes up by 2.5</b>. This is why a bicycle has a low gear for climbing: slow wheel, strong push. The reverse also holds: a gear that speeds things up weakens the force by the same factor.</p>
+    <p>Two meshing gears turn in <b>opposite</b> directions. Add a gear in between (an <b>idler</b>) and the output turns the same way as the input. The idler's own teeth cancel out: the ratio depends only on the first and last gear.</p>`);
+}
+
+// ---------- Planetary gears ----------
+
+function willis(held, drive, w, Ns, Nr) {
+  const o = { s: 0, c: 0, r: 0 };
+  const ks = { sun: 's', carrier: 'c', ring: 'r' };
+  o[ks[drive]] = w;
+  const unknown = ['s', 'c', 'r'].find((k) => k !== ks[held] && k !== ks[drive]);
+  // Ns*ws + Nr*wr = (Ns+Nr)*wc
+  if (unknown === 'c') o.c = (Ns * o.s + Nr * o.r) / (Ns + Nr);
+  else if (unknown === 's') o.s = ((Ns + Nr) * o.c - Nr * o.r) / Ns;
+  else o.r = ((Ns + Nr) * o.c - Ns * o.s) / Nr;
+  return o;
+}
+function drawPlanet() {
+  let { ns, np, held, drive, win } = ui.v;
+  while ((ns + np) % 3) np++;                     // so that three planets fit the teeth
+  const nr = ns + 2 * np;
+  if (drive === held) { drive = held === 'sun' ? 'ring' : 'sun'; ui.set('drive', drive, true); }
+  const w = willis(held, drive, win, ns, nr);
+  phS += tr.dt * w.s * TAU; phC += tr.dt * w.c * TAU;
+  const rs = ns / 2, rp = np / 2, rr = nr / 2;
+  const hy = rr + 5;
+  const L = pens[0].begin().box(-hy, hy, -hy, hy, 8);
+  const thR = phC + (Math.PI * np + (phC - phS) * ns) / nr;
+  // the ring: a toothed hole in a plate
+  const ctx = L.ctx, outer = []; for (let k = 0; k <= 90; k++) outer.push({ x: (rr + 4.5) * Math.cos((k / 90) * TAU), y: (rr + 4.5) * Math.sin((k / 90) * TAU) });
+  const inner = gear({ x: 0, y: 0 }, rr, nr, thR, true);
+  ctx.save(); ctx.beginPath();
+  for (const pts of [outer, inner]) pts.forEach((p, i) => { const q = L.P(p); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); });
+  ctx.closePath();
+  ctx.fillStyle = `${col.ring}44`; ctx.fill('evenodd'); ctx.restore();
+  L.poly(inner, { stroke: col.ring, width: 1.6 });
+  toothMark(L, { x: 0, y: 0 }, rr, nr, thR, '#e0e6ee', true);
+  L.line([{ x: (rr + 2.5) * Math.cos(thR), y: (rr + 2.5) * Math.sin(thR) }, { x: (rr + 4.5) * Math.cos(thR), y: (rr + 4.5) * Math.sin(thR) }], '#e0e6ee', 3);
+  // carrier arms
+  for (let k = 0; k < 3; k++) {
+    const a = phC + (k * TAU) / 3;
+    L.line([{ x: 0, y: 0 }, { x: (rs + rp) * Math.cos(a), y: (rs + rp) * Math.sin(a) }], 'rgba(155,231,166,0.55)', 4);
+  }
+  drawGear(L, { x: 0, y: 0 }, rs, ns, phS, col.a);
+  for (let k = 0; k < 3; k++) {
+    const a = phC + (k * TAU) / 3;
+    const psi = a + Math.PI - Math.PI / np + ((a - phS) * ns) / np;
+    const c = { x: (rs + rp) * Math.cos(a), y: (rs + rp) * Math.sin(a) };
+    drawGear(L, c, rp, np, psi, col.b);
+    L.dot(c, '#9be7a6', 3.5);
+  }
+  L.dot({ x: 0, y: 0 }, '#9be7a6', 5);
+  L.text('sun', { x: 0, y: -rs - 2 }, { size: 11, color: col.a, dy: 0 });
+  L.note('Sun (orange), three planets (blue) on a carrier (green), and the ring');
+
+  const R = pens[1].begin();
+  const top = Math.max(0.6, Math.abs(w.s), Math.abs(w.c), Math.abs(w.r)) * 1.25;
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 0, x1: 3, y0: -top, y1: top, title: 'Speed of each part (turns a second; below zero is the other way)', xTicks: 3, yTicks: 6, grid: false, fmtX: () => '', padB: 24, fmtY: (v) => v.toFixed(1) });
+  ch.hline(0, 'rgba(255,255,255,0.4)', [1, 0]);
+  const items = [{ k: 's', x: 0.5, color: col.a, n: 'sun' }, { k: 'c', x: 1.5, color: '#9be7a6', n: 'carrier' }, { k: 'r', x: 2.5, color: col.ring, n: 'ring' }];
+  ch.bars(items.map((i) => ({ x: i.x, y: w[i.k], color: i.color })), 0.7);
+  for (const i of items) ch.text(`${i.n}: ${w[i.k].toFixed(2)}`, i.x, w[i.k] >= 0 ? -top * 0.07 : top * 0.07, { align: 'center', size: 11.5, color: '#fff' });
+  const out = ['s', 'c', 'r'].find((k) => k !== { sun: 's', carrier: 'c', ring: 'r' }[held] && k !== { sun: 's', carrier: 'c', ring: 'r' }[drive]);
+  const nm = { s: 'sun', c: 'carrier', r: 'ring' };
+  const ratio = w[out] / win;
+  app.explain(`${nums([['teeth: sun, planet, ring', `${ns}, ${np}, ${nr}`], ['you turn the ' + drive + ' at', `${win.toFixed(2)}`], ['the ' + nm[out] + ' turns at', `${w[out].toFixed(2)}`, 'turns a second'], ['ratio, output ÷ input', ratio.toFixed(3)]])}
+    <p>A <b>planetary gear set</b> has three parts that turn about the same axis: the <b>sun</b> in the middle, the <b>ring</b> outside with teeth inside it, and the <b>planets</b> between them, held by a <b>carrier</b>. Hold one part still, turn another, and the third one is the output. One compact set gives a big slow-down, a reverse and a speed-up. Automatic gearboxes use several in a row.</p>
+    <p>The rule is the <b>Willis equation</b>: <b>(sun teeth) × (sun speed) + (ring teeth) × (ring speed) = (sun teeth + ring teeth) × (carrier speed)</b>. It comes from a rotating frame. Stand on the carrier and turn with it: you see an ordinary gear train, with the planets as idlers, and the ring turns against the sun at the ratio of the teeth. Then add the carrier's own turn to every part. That is the same step as in the rotating-frames pages: the speed in a frame is the speed seen from outside, minus the speed of the frame.</p>`);
+}
+
+// ---------- A car differential ----------
+
+function drawDiff() {
+  const { R, v, locked } = ui.v, w = 1.6, Lb = 2.7, rt = 0.33;
+  const vo = (v * (R + w / 2)) / R, vi = (v * (R - w / 2)) / R, vm = v;
+  const vOutAxle = locked ? vm : vo, vInAxle = locked ? vm : vi;   // how fast each driven wheel's rim moves
+  carA += (tr.dt * v) / R;
+  dists[0] += tr.dt * vOutAxle; dists[1] += tr.dt * vInAxle;       // rear wheels
+  dists[2] += tr.dt * vo * Math.hypot(1, Lb / R); dists[3] += tr.dt * vi * Math.hypot(1, Lb / R);
+  const hy = R + 3.5;
+  const Lw = pens[0].begin().box(-hy, hy, -hy, hy, 8);
+  Lw.circle({ x: 0, y: 0 }, R + w / 2, { stroke: 'rgba(255,255,255,0.22)', width: 1.2, dash: [4, 5] });
+  Lw.circle({ x: 0, y: 0 }, R - w / 2, { stroke: 'rgba(255,255,255,0.22)', width: 1.2, dash: [4, 5] });
+  Lw.dot({ x: 0, y: 0 }, '#9be7a6', 4); Lw.text('centre of the bend', { x: 0, y: 0 }, { dy: 14, size: 10.5, color: '#9be7a6' });
+  const a = carA, rad = { x: Math.cos(a), y: Math.sin(a) }, head = { x: -Math.sin(a), y: Math.cos(a) };
+  const rearC = V.mul ? V.mul(rad, R) : { x: rad.x * R, y: rad.y * R };
+  const frontC = { x: rearC.x + head.x * Lb, y: rearC.y + head.y * Lb };
+  const delta = Math.atan2(Lb, R);
+  const radF = { x: Math.cos(a + delta), y: Math.sin(a + delta) };
+  const wheelPos = [
+    { c: { x: rearC.x + rad.x * w / 2, y: rearC.y + rad.y * w / 2 }, h: head, n: 'outer rear' },
+    { c: { x: rearC.x - rad.x * w / 2, y: rearC.y - rad.y * w / 2 }, h: head, n: 'inner rear' },
+  ];
+  const fo = { x: frontC.x + radF.x * w / 2, y: frontC.y + radF.y * w / 2 }, fi = { x: frontC.x - radF.x * w / 2, y: frontC.y - radF.y * w / 2 };
+  const hd = (p) => { const l = Math.hypot(p.x, p.y); return { x: -p.y / l, y: p.x / l }; };
+  wheelPos.push({ c: fo, h: hd(fo) }, { c: fi, h: hd(fi) });
+  // body
+  const body = [wheelPos[1].c, wheelPos[0].c, fo, fi].map((p, i) => p);
+  Lw.poly(body, { fill: 'rgba(79,195,247,0.16)', stroke: 'rgba(79,195,247,0.5)', width: 1.4 });
+  const drawWheel = (wp, dist, color, slipping) => {
+    const hx = wp.h, nx = { x: -wp.h.y, y: wp.h.x };
+    const hl = 0.42, hw = 0.13;
+    const P = (u, s) => ({ x: wp.c.x + hx.x * u + nx.x * s, y: wp.c.y + hx.y * u + nx.y * s });
+    Lw.poly([P(-hl, -hw), P(hl, -hw), P(hl, hw), P(-hl, hw)], { fill: color, stroke: '#fff', width: 1 });
+    const pitch = 0.14, off = (dist % pitch) / pitch * pitch;
+    for (let u = -hl + off; u < hl; u += pitch) Lw.line([P(u, -hw), P(u, hw)], 'rgba(0,0,0,0.65)', 1.2);
+    if (slipping) Lw.circle(wp.c, 0.6, { stroke: '#ff5252', width: 2 });
+  };
+  const scrub = Math.abs(vo - vi) / 2;
+  wheelPos.forEach((wp, k) => drawWheel(wp, dists[k], k < 2 ? '#ff9a3c' : '#6b7a8a', locked && k < 2));
+  Lw.text('the outer wheel goes round the longer circle', { x: 0, y: R + w / 2 + 1.4 }, { size: 10.5, color: 'rgba(255,255,255,0.65)' });
+  Lw.note(locked ? 'Locked axle: both driven wheels must turn together, so the tyres scrub' : 'The driven wheels (orange) turn at different speeds');
+
+  const Rch = pens[1].begin();
+  const wr = (vv) => vv / (TAU * rt);
+  const xs = []; for (let r = 4; r <= 30.001; r += 0.5) xs.push(r);
+  const hi = wr(vo) > 0 ? wr(v * (4 + w / 2) / 4) * 1.1 : 1;
+  const ch = Rch.chart({ x: 4, y: 2, w: Rch.cw - 8, h: Rch.ch - 6 }, { x0: 4, x1: 30, y0: 0, y1: hi, title: 'Turns a second of each driven wheel, against the radius of the bend', xTicks: 6, yTicks: 5, xTitle: 'radius of the bend (m)', fmtX: (x) => x.toFixed(0), fmtY: (x) => x.toFixed(1) });
+  const f = (fn) => xs.map((r) => ({ x: r, y: wr(fn(r)) }));
+  const ou = f((r) => (v * (r + w / 2)) / r), inn = f((r) => (v * (r - w / 2)) / r);
+  ch.area(ou.map((p, i) => ({ x: p.x, y: p.y })), 'rgba(255,82,82,0.0)', 0);
+  ch.line(ou, '#ff9a3c', 3); ch.line(inn, '#ffd54f', 3); ch.line(f(() => v), 'rgba(255,255,255,0.6)', 1.8, [5, 4]);
+  ch.text('outer wheel', 29.5, wr(v) * 1.01, { align: 'right', size: 11, color: '#ff9a3c', dy: -12 });
+  ch.text('inner wheel', 29.5, wr(v) * 0.99, { align: 'right', size: 11, color: '#ffd54f', dy: 12 });
+  ch.vline(R); ch.dot(R, wr(vo), '#ff9a3c', 5); ch.dot(R, wr(vi), '#ffd54f', 5);
+  const rpm = (vv) => `${(wr(vv) * 60).toFixed(0)} rpm`;
+  app.explain(`${nums([['outer wheel', rpm(vo)], ['inner wheel', rpm(vi)], ['driveshaft side (the average)', rpm((vo + vi) / 2)], [locked ? 'each tyre scrubs the road at' : 'the outer wheel is faster by', locked ? `${(scrub * 3.6).toFixed(1)} km/h` : `${((vo / vi - 1) * 100).toFixed(0)}%`]])}
+    <p>In a bend, the outer wheel goes round a bigger circle than the inner one, so it must travel farther in the same time, and turn faster. In a tight bend of 8 m, with wheels 1.6 m apart, the outer wheel turns 22% faster than the inner one. A single rigid axle cannot do this: one tyre has to slide on the road. Try <b>Lock the axle</b>: the tyres scrub, they wear, and the car pushes straight on instead of turning.</p>
+    <p>A <b>differential</b> fixes it. Inside the axle, small bevel gears sit on a cage that the engine turns. They are a planetary gear set where both outside gears are the wheels. By the Willis equation of the previous mode, the <b>sum</b> of the two wheel speeds is fixed by the cage: (left + right) ÷ 2 = the speed of the cage. The engine fixes only the average. The difference is free, and the road decides it. That is also why one wheel on ice spins freely while the other one gets no force.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'train') drawTrain(); else if (m === 'planet') drawPlanet(); else drawDiff();
+}
+tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>
