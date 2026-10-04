@@ -162,6 +162,7 @@
     { slug: 'sphere', group: 6, title: 'An arrow carried round a sphere', blurb: 'Carry an arrow round a loop on a globe without turning it, and it comes back turned. The Foucault pendulum does this.' },
     { slug: 'gears', group: 7, title: 'Gears and differentials', blurb: 'Gear ratios, planetary gears as rotating frames, and why the two wheels of a turning car need a differential.' },
     { slug: 'wagon', group: 7, title: 'Wagon wheels on film', blurb: 'Why wheels seem to turn slowly, stand still or run backward on video. A wheel seen at a few frames a second.' },
+    { slug: 'levers', group: 7, title: 'Levers and torque', blurb: 'Turning force is force times distance from the pivot. Balance a beam, meet the three classes of lever, and see what you trade for the extra force.' },
   ];
 
   // Small pictures for the home page and the menu. Each fits a 64 by 64 box.
@@ -184,6 +185,7 @@
     sphere: ic(`<circle cx="32" cy="32" r="22" stroke="${W}"/><path d="M32 10C22 22 22 42 32 54" stroke="${A}"/><path d="M32 10C44 20 50 28 54 32" stroke="${A}"/><path d="M32 54C44 46 50 38 54 32" stroke="${A}" stroke-dasharray="3 3"/><path d="M32 12l7 8" stroke="${B}"/>`),
     gears: ic(`<circle cx="24" cy="36" r="15" stroke="${A}" stroke-dasharray="4 3" stroke-width="5"/><circle cx="24" cy="36" r="5" stroke="${A}"/><circle cx="47" cy="22" r="9" stroke="${B}" stroke-dasharray="3 3" stroke-width="4"/>`),
     wagon: ic(`<circle cx="32" cy="32" r="22" stroke="${W}"/><path d="M32 10v44M10 32h44M16 16l32 32M48 16L16 48" stroke="${W}" stroke-width="1.6"/><path d="M52 14a24 24 0 0 1 4 12M52 14h-8" stroke="${B}"/>`),
+    levers: ic(`<path d="M6 44L58 24" stroke="${W}"/><path d="M28 36l-8 14h16z" stroke="${A}"/><rect x="40" y="10" width="12" height="12" stroke="${B}"/><path d="M10 14v14" stroke="${G}"/><path d="M6 24l4 5 4-5" stroke="${G}"/>`),
     lagrange: ic(`<circle cx="22" cy="34" r="11" stroke="${Y}"/><circle cx="48" cy="34" r="4" stroke="${A}"/><circle cx="35" cy="14" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="54" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="58" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="4" cy="34" r="2.5" fill="${B}" stroke="none"/>`),
     gyroscope: ic(`<ellipse cx="38" cy="26" rx="16" ry="8" transform="rotate(-20 38 26)" stroke="${A}"/><path d="M8 54l22-22" stroke="${W}"/><path d="M12 12c6-4 14-4 20 0" stroke="${B}"/><path d="M28 8l4 4-5 3" stroke="${B}"/>`),
     momentum: ic(`<circle cx="32" cy="32" r="5" fill="${W}" stroke="none"/><path d="M32 32L12 22M32 32L52 42" stroke="${W}"/><circle cx="12" cy="22" r="4" fill="${A}" stroke="none"/><circle cx="52" cy="42" r="4" fill="${A}" stroke="none"/><path d="M52 14a24 24 0 0 0-20-6" stroke="${B}"/><path d="M52 6v8h-8" stroke="${B}"/>`),

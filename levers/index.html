@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Levers and torque · Spin</title>
+<meta name="description" content="Torque is force times the distance from the pivot, at right angles. Balance a beam, meet the three classes of lever, see that a lever trades force for distance, and see why a push at an angle wastes force." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG, clamp } = Spin;
+
+const app = Spin.app({
+  slug: 'levers',
+  sub: 'A lever is a beam that turns about a pivot. What counts is the force times the distance from the pivot.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', speed: { min: 0.1, max: 2, value: 1, step: 0.05 }, autostart: true,
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['balance', 'Balance a beam'], ['classes', 'Three classes'], ['trade', 'Force for distance'], ['pivot', 'A push at an angle']]);
+const is = (m) => (v) => v.mode === m;
+
+// Balance a beam
+ui.slider('piv', { label: 'Where the pivot is', min: 1, max: 9, step: 0.1, value: 5, fmt: (v) => `${v} m from the left end`, show: is('balance') });
+ui.slider('ma', { label: 'Blue weight', min: 0, max: 20, step: 1, value: 10, fmt: (v) => `${v} kg`, show: is('balance') });
+ui.slider('xa', { label: 'Blue weight sits at', min: 0.3, max: 9.7, step: 0.1, value: 2, fmt: (v) => `${v} m`, show: is('balance') });
+ui.slider('mb', { label: 'Orange weight', min: 0, max: 20, step: 1, value: 5, fmt: (v) => `${v} kg`, show: is('balance') });
+ui.slider('xb', { label: 'Orange weight sits at', min: 0.3, max: 9.7, step: 0.1, value: 8, fmt: (v) => `${v} m`, show: is('balance') });
+ui.chips([
+  { text: 'See-saw, equal weights', set: { piv: 5, ma: 10, xa: 1, mb: 10, xb: 9 } },
+  { text: 'Heavy and light, pivot in the middle', set: { piv: 5, ma: 10, xa: 2, mb: 5, xb: 8 } },
+  { text: 'Move the pivot to the balance point', set: { piv: 4, ma: 10, xa: 2, mb: 5, xb: 8 } },
+], { show: is('balance') });
+// Three classes
+ui.seg('cls', [[1, 'Class 1: pivot between'], [2, 'Class 2: load between'], [3, 'Class 3: effort between']], { label: 'Which lever', pick: true, cols: 1, value: 1, show: is('classes') });
+ui.slider('pos', { label: 'Move the part in the middle', min: 1.5, max: 8, step: 0.1, value: 4, fmt: (v) => `${v} m from the left end`, show: is('classes') });
+ui.slider('W', { label: 'The load', min: 20, max: 500, step: 10, value: 100, fmt: (v) => `${v} N`, show: is('classes') });
+// Force for distance
+ui.slider('a', { label: 'Length of the arm you push', min: 1, max: 8, step: 0.1, value: 6, fmt: (v) => `${v} m`, show: (v) => v.mode === 'trade' || v.mode === 'pivot' });
+ui.slider('b', { label: 'Length of the arm that carries the load', min: 0.5, max: 4, step: 0.1, value: 1.5, fmt: (v) => `${v} m`, show: (v) => v.mode === 'trade' || v.mode === 'pivot' });
+ui.slider('L', { label: 'The load', min: 50, max: 1000, step: 10, value: 400, fmt: (v) => `${v} N`, show: (v) => v.mode === 'trade' || v.mode === 'pivot' });
+ui.slider('ang', { label: 'Direction of your push, from the beam', min: 10, max: 170, step: 1, value: 90, fmt: (v) => `${v}°`, show: is('pivot') });
+ui.chips([{ text: 'Push at a right angle', set: { ang: 90 } }, { text: 'Shallow push (30°)', set: { ang: 30 } }, { text: 'Push leaning away (130°)', set: { ang: 130 } }], { show: is('pivot') });
+
+ui.on((id) => { if (id === 'mode') setup(); if (ui.v.mode === 'trade' || id === 'mode') tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo(m === 'trade' ? 'Push down' : 'Restart');
+  app.caption(0, m === 'balance' ? 'A beam on a pivot, with two weights' : m === 'classes' ? 'The forces on the lever' : m === 'trade' ? 'Push one end down and the other end goes up' : 'A bar pulling on a load, pushed at an angle');
+  app.caption(1, m === 'balance' ? 'Turning effect of each side (kilogram-metres)' : m === 'classes' ? 'The push you need, against the place of the middle part' : m === 'trade' ? 'What you give and what you get' : 'The push you need, and the force on the pivot, against the direction');
+}
+
+const rot = (c, d, a, n = 0) => ({ x: c.x + d * Math.cos(a) - n * Math.sin(a), y: c.y - d * Math.sin(a) - n * Math.cos(a) });   // a: clockwise turn
+function square(pen, c, d, a, size, color, label) {
+  const p = (u, n) => rot(c, d + u, a, -n);
+  pen.poly([p(-size / 2, 0), p(size / 2, 0), p(size / 2, size), p(-size / 2, size)], { fill: `${color}66`, stroke: color, width: 2 });
+  const tc = p(0, size / 2); pen.text(label, tc, { size: 11.5, color: '#fff' });
+}
+function pivotTriangle(pen, c, h = 0.9) {
+  pen.poly([c, { x: c.x - h * 0.6, y: c.y - h }, { x: c.x + h * 0.6, y: c.y - h }], { fill: 'rgba(155,231,166,0.28)', stroke: '#9be7a6', width: 2 });
+  pen.dot(c, '#9be7a6', 4);
+}
+const arrowOf = (pen, from, vec, color, label, scale) => pen.arrow(from, { x: vec.x * scale, y: vec.y * scale }, color, 4, label);
+
+// ---------- Balance ----------
+
+let beamAng = 0;
+function drawBalance() {
+  const { piv, ma, xa, mb, xb } = ui.v;
+  const torque = ma * (xa - piv) + mb * (xb - piv);            // clockwise is positive: the right side goes down
+  const target = 0.3 * Math.tanh(torque / 8);
+  beamAng += (target - beamAng) * Math.min(1, 4 * Math.max(tr.dt, 0.016));
+  const O = { x: piv, y: 0 };
+  const L = pens[0].begin().box(-1, 11, -2.6, 4.2, 14);
+  pivotTriangle(L, O, 1.4);
+  const e0 = rot(O, -piv, beamAng), e1 = rot(O, 10 - piv, beamAng);
+  L.line([e0, e1], '#cfd8e3', 7);
+  for (let k = 0; k <= 10; k++) { const q = rot(O, k - piv, beamAng); const q2 = rot(O, k - piv, beamAng, -0.12); L.line([q, q2], 'rgba(255,255,255,0.45)', 1.4); if (k % 2 === 0) L.text(String(k), rot(O, k - piv, beamAng, 0.4), { size: 10, color: 'rgba(255,255,255,0.55)', shadow: false }); }
+  const size = (m) => 0.45 + 0.09 * Math.sqrt(m);
+  if (ma > 0) square(L, O, xa - piv, beamAng, size(ma) * 1.1, '#4fc3f7', `${ma} kg`);
+  if (mb > 0) square(L, O, xb - piv, beamAng, size(mb) * 1.1, '#ff9a3c', `${mb} kg`);
+  L.text(Math.abs(torque) < 0.05 ? 'Balanced' : torque > 0 ? 'The right side goes down' : 'The left side goes down', { x: 5, y: 3.5 }, { size: 13, color: '#fff' });
+  L.note('The beam has no weight of its own, to keep the picture simple');
+
+  const left = (ma * Math.max(0, piv - xa)) + (mb * Math.max(0, piv - xb)), right = (ma * Math.max(0, xa - piv)) + (mb * Math.max(0, xb - piv));
+  const R = pens[1].begin();
+  const top = Math.max(10, left, right) * 1.2;
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 0, x1: 2, y0: 0, y1: top, title: 'Weight times distance from the pivot, on each side', xTicks: 2, yTicks: 5, grid: false, fmtX: () => '', padB: 26, fmtY: (v) => v.toFixed(0) });
+  ch.bars([{ x: 0.5, y: left, color: '#8f9bff' }, { x: 1.5, y: right, color: '#ffb36b' }], 0.7);
+  ch.text(`left of the pivot: ${left.toFixed(0)}`, 0.5, top * 0.06, { align: 'center', size: 12, color: '#000' });
+  ch.text(`right of the pivot: ${right.toFixed(0)}`, 1.5, top * 0.06, { align: 'center', size: 12, color: '#000' });
+  app.explain(`${nums([['turning effect, left side', `${left.toFixed(1)}`, 'kg·m'], ['turning effect, right side', `${right.toFixed(1)}`, 'kg·m'], ['difference', Math.abs(torque).toFixed(1), 'kg·m'], ['balance point of the two weights', ma + mb > 0 ? `${((ma * xa + mb * xb) / (ma + mb)).toFixed(2)} m` : '–']])}
+    <p>A weight pulls a beam down, but whether it makes the beam turn, and how much, depends on <b>how far it is from the pivot</b>. The turning effect is called <b>torque</b>: force × distance, measured at right angles to the force. Here the force is the weight, and the distance is along the beam. A 10 kg weight at 2 m from the pivot has the same torque as a 5 kg weight at 4 m from it (10 × 2 = 5 × 4). The beam is in balance when the torque on the left equals the torque on the right.</p>
+    <p>Move the pivot toward the heavy weight and the light one lifts it. This is why an adult sits near the middle of a see-saw and a child sits at the end. The balance point of the two weights, the last number above, is where the pivot has to be: it is the <b>centre of mass</b> of the two. Beyond it, the beam turns the other way.</p>`);
+}
+
+// ---------- Three classes ----------
+
+function parts(cls, pos) {
+  if (cls === 1) return { f: pos, l: 1, e: 9 };
+  if (cls === 2) return { f: 0.5, l: pos, e: 9.5 };
+  return { f: 0.5, l: 9.5, e: pos };
+}
+const effort = (cls, pos, W) => { const p = parts(cls, pos); return (W * Math.abs(p.l - p.f)) / Math.abs(p.e - p.f); };
+function drawClasses() {
+  const { cls, pos, W } = ui.v;
+  const p = parts(cls, pos), E = effort(cls, pos, W);
+  const lSign = -1;                                                // the load pulls down
+  const eSign = cls === 1 ? -1 : 1;                                // effort: down for class 1, up for 2 and 3
+  const Ry = -(lSign * W + eSign * E);                             // the pivot's force, up positive
+  const L = pens[0].begin().box(-1, 11, -3.4, 4.6, 12);
+  pivotTriangle(L, { x: p.f, y: 0 }, 1.2);
+  L.line([{ x: 0, y: 0 }, { x: 10, y: 0 }], '#cfd8e3', 7);
+  for (let k = 0; k <= 10; k++) L.line([{ x: k, y: 0 }, { x: k, y: -0.14 }], 'rgba(255,255,255,0.4)', 1.2);
+  const mx = Math.max(W, E, Math.abs(Ry), 1), sc = 2.2 / mx;
+  L.dot({ x: p.l, y: 0 }, '#4fc3f7', 7); L.dot({ x: p.e, y: 0 }, '#ff9a3c', 7);
+  arrowOf(L, { x: p.l, y: 0 }, { x: 0, y: -W }, '#4fc3f7', `load ${W} N`, sc);
+  arrowOf(L, { x: p.e, y: 0 }, { x: 0, y: eSign * E }, '#ff9a3c', `your push ${E.toFixed(0)} N`, sc);
+  if (Math.abs(Ry) > 1) arrowOf(L, { x: p.f, y: -1.2 }, { x: 0, y: Ry }, '#9be7a6', `pivot ${Math.abs(Ry).toFixed(0)} N ${Ry > 0 ? 'up' : 'down'}`, sc);
+  const ex = { 1: 'Seesaw, crowbar, scissors, pliers', 2: 'Wheelbarrow, bottle opener, nutcracker', 3: 'Tweezers, fishing rod, the forearm (the biceps pulls near the elbow)' }[cls];
+  L.note(ex);
+
+  const R = pens[1].begin();
+  const lo = cls === 1 ? 2 : 1.5, xs = []; for (let x = 1.5; x <= 8.001; x += 0.1) xs.push(x);
+  const ys = xs.map((x) => effort(cls, x, W)), top = Math.max(W * 1.4, ...ys) * 1.1;
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 1.5, x1: 8, y0: 0, y1: top, title: 'The push you need to hold the load level (N)', xTicks: 6, yTicks: 5, xTitle: 'place of the middle part (m)', fmtY: (v) => v.toFixed(0) });
+  ch.hline(W, 'rgba(79,195,247,0.8)'); ch.text('the load', 8, W, { align: 'right', dy: -10, size: 10.5, color: '#4fc3f7' });
+  ch.line(xs.map((x, i) => ({ x, y: ys[i] })), '#ff9a3c', 3);
+  ch.dot(pos, E, '#fff', 6);
+  const MA = W / E;
+  const word = cls === 3 ? 'always more than the load' : MA > 1.01 ? 'less than the load' : MA < 0.99 ? 'more than the load' : 'the same as the load';
+  app.explain(`${nums([['load', `${W} N`], ['push you need', `${E.toFixed(0)} N`, `(${word})`], ['mechanical advantage (load ÷ push)', MA.toFixed(2)], ['force the pivot gives', `${Math.abs(Ry).toFixed(0)} N`, Ry > 0 ? 'up' : 'down']])}
+    <p>Levers come in three classes, by which of the three parts sits in the middle. In <b>class 1</b> the pivot is in the middle: push one end down and the other goes up. In <b>class 2</b> the load is in the middle: a wheelbarrow carries the load between the wheel (the pivot) and your hands, so you carry only a part of its weight. In <b>class 3</b> your push is in the middle, between the pivot and the load: you push harder than the load, but the load moves farther and faster than your hand.</p>
+    <p>The rule is the same for all three, the balance of torques: <b>push × its distance to the pivot = load × its distance to the pivot</b>. Slide the middle part and watch the push needed change. In class 1 and 2 it can be smaller than the load. In class 3 it never is, and this is the lever of tweezers, fishing rods and the human arm: you choose strength less than speed and reach. Also look at the green arrow: the pivot carries the rest of the force, so the sum of all forces on the beam is zero.</p>`);
+}
+
+// ---------- Force for distance ----------
+
+function drawTrade() {
+  const { a, b, L: W } = ui.v;
+  const phi = clamp(tr.t * 0.22, 0, 0.45);
+  if (tr.running && tr.t * 0.22 > 0.45 + 0.35) tr.finish();
+  const F = (W * b) / a;
+  const de = a * Math.sin(phi), dl = b * Math.sin(phi);
+  const hy = Math.max(a, b) * 0.6 + 1.4;
+  const Lw = pens[0].begin().box(-a - 1.5, b + 2, -hy - 1, hy + 1, 12);
+  const O = { x: 0, y: 0 };
+  pivotTriangle(Lw, O, Math.max(0.7, hy * 0.35));
+  const pt = (d) => ({ x: d * Math.cos(phi), y: d * Math.sin(phi) });                // counterclockwise turn: the left (effort) end goes down
+  const eEnd = pt(-a), lEnd = pt(b);
+  Lw.line([eEnd, lEnd], '#cfd8e3', 7);
+  const sz = 0.5 + 0.0009 * W * 0.6;
+  Lw.poly([lEnd, { x: lEnd.x + sz, y: lEnd.y }, { x: lEnd.x + sz, y: lEnd.y + sz }, { x: lEnd.x, y: lEnd.y + sz }].map((q) => ({ x: q.x - sz / 2, y: q.y })), { fill: '#4fc3f766', stroke: '#4fc3f7', width: 2 });
+  Lw.text(`${W} N`, { x: lEnd.x, y: lEnd.y + sz / 2 }, { size: 11.5, color: '#fff' });
+  const scale = (0.55 * Math.max(a, b) + 1) / Math.max(W, F);
+  Lw.arrow({ x: eEnd.x, y: eEnd.y + F * scale }, { x: 0, y: -F * scale }, '#ff9a3c', 4, `${F.toFixed(0)} N`);
+  Lw.text(`arm ${a} m`, { x: -a / 2, y: -hy * 0.6 }, { size: 11, color: '#ff9a3c' }); Lw.text(`arm ${b} m`, { x: b / 2, y: -hy * 0.6 }, { size: 11, color: '#4fc3f7' });
+  Lw.note(`Your end moves down ${de.toFixed(2)} m. The load goes up ${dl.toFixed(2)} m`);
+
+  const R = pens[1].begin();
+  const h2 = R.ch / 2 - 4, dmax = a * Math.sin(0.45);
+  const top1 = Math.max(W, F) * 1.2;
+  const c1 = R.chart({ x: 4, y: 2, w: R.cw - 8, h: h2 }, { x0: 0, x1: 2, y0: 0, y1: top1, title: 'Force (N): your push and the load', xTicks: 2, yTicks: 3, grid: false, fmtX: () => '', padB: 8, fmtY: (v) => v.toFixed(0) });
+  c1.bars([{ x: 0.5, y: F, color: '#ffb36b' }, { x: 1.5, y: W, color: '#4fc3f7' }], 0.7);
+  c1.text(`push ${F.toFixed(0)}`, 0.5, top1 * 0.08, { align: 'center', size: 12, color: '#000' }); c1.text(`load ${W}`, 1.5, top1 * 0.08, { align: 'center', size: 12, color: '#000' });
+  const c2 = R.chart({ x: 4, y: h2 + 8, w: R.cw - 8, h: h2 }, { x0: 0, x1: 2, y0: 0, y1: dmax * 1.15, title: 'Distance moved (m): your hand and the load', xTicks: 2, yTicks: 3, grid: false, fmtX: () => '', padB: 8, fmtY: (v) => v.toFixed(1) });
+  c2.bars([{ x: 0.5, y: de, color: '#ffb36b' }, { x: 1.5, y: dl, color: '#4fc3f7' }], 0.7);
+  c2.text(`hand ${de.toFixed(2)}`, 0.5, dmax * 0.08, { align: 'center', size: 12, color: '#000' }); c2.text(`load ${dl.toFixed(2)}`, 1.5, dmax * 0.08, { align: 'center', size: 12, color: '#000' });
+  const work = F * de, workL = W * dl;
+  app.explain(`${nums([['push you need', `${F.toFixed(0)} N`, `(${(W / F).toFixed(1)} times less than the load)`], ['you move', `${de.toFixed(2)} m`], ['the load moves', `${dl.toFixed(2)} m`], ['work you do / work on the load', `${work.toFixed(0)} / ${workL.toFixed(0)}`, 'J']])}
+    <p>A long arm and a short arm: push the long one a long way, and the short one rises a short way. The two ends are on the same turning beam, so they move in the same ratio as their arms: <b>distance moved ∝ arm length</b>. The forces go the other way: <b>force × arm</b> is equal on both sides. So what you gain in force you pay for in distance.</p>
+    <p>The numbers above show it. Your push times the distance your hand moves is the work you do. The load's weight times the distance it rises is the work done on the load. They are equal. A lever (or a gear, or a pulley) does not give you energy. It gives you a different mix of force and distance, which is often what you need: a car jack lifts a car with the force of an arm. This is the same trade as in the gear page: speed against turning force, with the product fixed.</p>`);
+}
+
+// ---------- A push at an angle ----------
+
+function drawPivot() {
+  const { a, b, L: W, ang } = ui.v;
+  const th = ang * DEG, s = Math.sin(th), c = Math.cos(th);
+  const F = (W * b) / (a * s);
+  const Rx = -F * c, Ry = W - F * s, Rm = Math.hypot(Rx, Ry);
+  const Lw = pens[0].begin().box(-2, a + 3, -3.4, 4.6, 10);
+  pivotTriangle(Lw, { x: 0, y: 0 }, 1.2);
+  Lw.line([{ x: 0, y: 0 }, { x: a, y: 0 }], '#cfd8e3', 7);
+  const sc = 2.0 / Math.max(W, 1);
+  Lw.dot({ x: b, y: 0 }, '#4fc3f7', 7);
+  Lw.arrow({ x: b, y: 0 }, { x: 0, y: -W * sc }, '#4fc3f7', 4, `load ${W} N`);
+  const len = Math.min(F * sc, 4);
+  Lw.arrow({ x: a - c * len, y: -s * len }, { x: c * len, y: s * len }, '#ff9a3c', 4, `your push ${F.toFixed(0)} N`);
+  const rl = Math.min(Rm * sc, 4);
+  if (Rm > 1) Lw.arrow({ x: 0, y: -1.2 }, { x: (Rx / Rm) * rl, y: (Ry / Rm) * rl }, '#9be7a6', 4, `pivot ${Rm.toFixed(0)} N`);
+  // the part of the push that turns the beam
+  Lw.line([{ x: a, y: 0 }, { x: a, y: (s * len) }], 'rgba(255,255,255,0.35)', 1.4, [4, 4]);
+  Lw.note('Only the part of the push at right angles to the beam turns it');
+
+  const R = pens[1].begin();
+  const xs = []; for (let x = 10; x <= 170.001; x += 1) xs.push(x);
+  const Fs = xs.map((x) => (W * b) / (a * Math.sin(x * DEG))), Rs = xs.map((x) => { const t = x * DEG, f = (W * b) / (a * Math.sin(t)); return Math.hypot(-f * Math.cos(t), W - f * Math.sin(t)); });
+  const top = Math.min(Math.max(...Fs, ...Rs) * 1.05, W * 6);
+  const ch = R.chart({ x: 4, y: 2, w: R.cw - 8, h: R.ch - 6 }, { x0: 10, x1: 170, y0: 0, y1: top, title: 'Push you need (orange) and force on the pivot (green), in N', xTicks: 8, yTicks: 5, xTitle: 'direction of the push, from the beam (degrees)', fmtY: (v) => v.toFixed(0) });
+  ch.line(Fs.map((y, i) => ({ x: xs[i], y })), '#ff9a3c', 3); ch.line(Rs.map((y, i) => ({ x: xs[i], y })), '#9be7a6', 3);
+  ch.vline(90, 'rgba(255,255,255,0.3)');
+  ch.dot(ang, F, '#fff', 6); ch.dot(ang, Rm, '#fff', 6);
+  const ideal = (W * b) / a;
+  app.explain(`${nums([['push you need', `${F.toFixed(0)} N`], ['at a right angle you would need', `${ideal.toFixed(0)} N`], ['part of the push that turns the beam', `${(s * 100).toFixed(0)}%`], ['force on the pivot', `${Rm.toFixed(0)} N`]])}
+    <p>The torque of a force is its size times the distance, but only the part of the force at <b>right angles to the beam</b> counts. A push along the beam does nothing to turn it, it only squeezes the beam. At an angle θ, the turning part is F sin θ, so you need <b>F = load × load arm ÷ (your arm × sin θ)</b>. At 90° you need the least. At 30° you need twice as much, and at 10° almost six times as much. Push on the end of a wrench, at right angles to the handle, and a stuck bolt turns. Push at a shallow angle and it does not.</p>
+    <p>The green curve is the force the pivot must give, the rest of the balance. A push at a shallow angle costs more twice: you push harder, and the pivot has to carry that bigger force too. When the push leans away (more than 90°), the sideways part of it pulls the beam away from the pivot instead of pressing it in. A crowbar, a claw hammer and a spanner are all this beam.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'balance') drawBalance(); else if (m === 'classes') drawClasses(); else if (m === 'trade') drawTrade(); else drawPivot();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

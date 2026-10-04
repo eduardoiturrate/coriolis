@@ -103,6 +103,9 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
   gear train seen from a turning frame), and a car differential in a bend.
 - `wagon`: wheels on film that seem to run backward or stand still, and the same aliasing in any
   sampled signal (the Nyquist limit).
+- `levers`: torque as force × distance from the pivot. Balancing a beam (the balance point is the
+  centre of mass), the three classes of lever, the trade of force for distance (the work stays the
+  same), and why a push at an angle wastes force (F sin θ).
 
 ## How it is built
 
