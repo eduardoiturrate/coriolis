@@ -21,6 +21,7 @@ const app = Spin.app({
   views: [{ caption: 'Seen from outside, not turning' }, { caption: 'Seen from the turning frame' }],
 });
 const { ui, tr, pens } = app;
+const cam = new Spin.Cam3(pens[0], { az: 0.6, el: 0.5, dist: 6.3, fov: 36, min: 3, max: 12, target: { x: 0, y: 0, z: 0.9 } });
 
 app.modes('mode', [['string', 'Ball on a string'], ['bucket', 'Spinning bucket'], ['rotor', 'Wall ride']]);
 const isMode = (m) => (v) => v.mode === m;
@@ -44,10 +45,11 @@ function setupMode() {
   tr.setGo(m === 'string' ? 'Cut the string' : m === 'bucket' ? 'Spin up from rest' : 'Drop the floor');
   const caps = {
     string: ['Seen from outside, not turning', 'Seen by the ball, turning with it'],
-    bucket: ['Side view of the bucket, not turning', 'The same, as seen by the water'],
+    bucket: ['Seen from outside, not turning (drag to turn the view)', 'A slice through the bucket, as seen by the water'],
     rotor: ['From above, not turning', 'From the side, turning with the ride'],
   }[m];
   app.caption(0, caps[0]); app.caption(1, caps[1]);
+  cam.setActive(m === 'bucket');
 }
 tr.onStart = () => { flying = ui.v.mode === 'string'; cutPhase = phase; };
 ui.on((id) => { if (id === 'mode') setupMode(); flying = false; tr.reset(); });
@@ -120,40 +122,78 @@ function drawString(dt) {
 const BR = 0.15, BH = 0.32, DEPTH = 0.15;
 const surface = (r, w) => DEPTH + (w * w * (r * r - (BR * BR) / 2)) / (2 * G);
 
-function drawBucket() {
+const tracers = (() => { const r = Spin.rng(11), o = []; for (let i = 0; i < 34; i++) o.push({ r: 0.12 + 0.83 * Math.sqrt(r()), a: TAU * r(), d: 0.1 + 0.75 * r() }); return o; })();
+let bPhase = 0;
+
+function drawBucket(dt) {
   const { bps, parcel } = ui.v;
   const wFull = TAU * bps;
   const spinning = tr.running || tr.endedAt;
   const w = spinning ? wFull * Math.min(1, tr.t / 4) : wFull;
   if (spinning && tr.t > 6) tr.finish();
+  bPhase += w * 0.3 * dt;
+  const rp = parcel * BR;
+  const tilt = Math.atan2(w * w * rp, G); // the angle of the surface, and of the effective gravity from the vertical
+  const u = 0.075; // length of the weight arrow, in meters
+
+  // Left: the bucket in 3D. The water turns as one piece. Lengths here are in bucket radii.
+  const S = 1 / BR, zs = (r) => surface(r * BR, w) * S, H = BH * S;
+  pens[0].begin(); cam.begin();
+  const NR = 8, NA = 36, faces = [];
+  const pt = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a), z: zs(r) });
+  for (let k = 0; k < NR; k++) for (let a = 0; a < NA; a++) {
+    const r0 = k / NR, r1 = (k + 1) / NR, a0 = (a / NA) * TAU, a1 = ((a + 1) / NA) * TAU;
+    faces.push({ pts: [pt(r0, a0), pt(r1, a0), pt(r1, a1), pt(r0, a1)], fill: `rgba(79,195,247,${0.2 + 0.12 * ((k + a) % 2)})`, stroke: 'rgba(255,255,255,0.1)', width: 1 });
+  }
+  for (let a = 0; a < NA; a++) {
+    const a0 = (a / NA) * TAU, a1 = ((a + 1) / NA) * TAU;
+    faces.push({ pts: [{ x: Math.cos(a0), y: Math.sin(a0), z: 0 }, { x: Math.cos(a1), y: Math.sin(a1), z: 0 }, { x: Math.cos(a1), y: Math.sin(a1), z: zs(1) }, { x: Math.cos(a0), y: Math.sin(a0), z: zs(1) }], fill: 'rgba(79,195,247,0.14)' });
+  }
+  cam.faces(faces);
+  const ring = (z) => { const o = []; for (let k = 0; k <= 60; k++) o.push({ x: Math.cos((k / 60) * TAU), y: Math.sin((k / 60) * TAU), z }); return o; };
+  cam.line(ring(0), 'rgba(201,211,223,0.8)', 2.5); cam.line(ring(H), 'rgba(201,211,223,0.9)', 3);
+  for (let k = 0; k < 8; k++) cam.line([{ x: Math.cos((k * TAU) / 8), y: Math.sin((k * TAU) / 8), z: 0 }, { x: Math.cos((k * TAU) / 8), y: Math.sin((k * TAU) / 8), z: H }], 'rgba(201,211,223,0.35)', 1.2);
+  cam.line([{ x: 0, y: 0, z: -0.15 }, { x: 0, y: 0, z: H + 0.25 }], 'rgba(255,255,255,0.3)', 1.2, [4, 5]);
+  // Four stripes painted on the water, and little floating bits, all turning together.
+  for (let k = 0; k < 4; k++) { const a = bPhase + (k * TAU) / 4, o = []; for (let j = 0; j <= 16; j++) o.push(pt(j / 16, a)); cam.line(o, 'rgba(255,162,74,0.55)', 2); }
+  for (const t of tracers) {
+    const z = 0.06 + t.d * Math.max(0.1, zs(t.r) - 0.12);
+    const trail = []; for (let j = 5; j >= 0; j--) trail.push({ x: t.r * Math.cos(t.a + bPhase - j * 0.09), y: t.r * Math.sin(t.a + bPhase - j * 0.09), z });
+    cam.line(trail, 'rgba(255,255,255,0.35)', 1.5);
+    cam.dot(trail[5], '#fff', 3);
+  }
+  // A bit of water on the surface, with its forces. They are in the plane through the axis.
+  const rn = parcel, er = { x: Math.cos(bPhase), y: Math.sin(bPhase), z: 0 }, ez = { x: 0, y: 0, z: 1 };
+  const P = pt(rn, bPhase), ut = u * S;
+  cam.dot(P, C.ink, 7);
+  cam.arrow(P, { x: 0, y: 0, z: -ut }, C.ink, 3, 'weight');
+  const nrm = { x: -Math.sin(tilt) * er.x, y: -Math.sin(tilt) * er.y, z: Math.cos(tilt) };
+  cam.arrow(P, { x: nrm.x * ut / Math.cos(tilt), y: nrm.y * ut / Math.cos(tilt), z: nrm.z * ut / Math.cos(tilt) }, C.ball, 3, 'push of the water');
+  cam.arrow(P, { x: -er.x * ut * Math.tan(tilt), y: -er.y * ut * Math.tan(tilt), z: 0 }, C.you, 3.5, 'net: toward the axis');
+  cam.arrow(P, { x: -Math.sin(bPhase) * 0.9, y: Math.cos(bPhase) * 0.9, z: 0 }, C.spin, 3, 'moves');
+  pens[0].note('Not turning with the water: the net force on a bit of it points to the axis');
+
+  // Right: the turning frame. The water is at rest, and the forces add up to zero.
+  const pen = pens[1];
+  pen.begin().box(-0.22, 0.22, -0.05, BH + 0.06, 14);
   const pts = [];
   for (let i = -30; i <= 30; i++) { const r = (i / 30) * BR; pts.push({ x: r, y: surface(Math.abs(r), w) }); }
-  const rp = parcel * BR, p = { x: rp, y: surface(rp, w) };
-  const tilt = Math.atan2(w * w * rp, G); // the angle of the surface, and of the effective gravity from the vertical
-  const u = 0.075; // length of the weight arrow
-  for (const [i, pen] of [[0, pens[0]], [1, pens[1]]]) {
-    pen.begin().box(-0.22, 0.22, -0.05, BH + 0.06, 14);
-    pen.line([{ x: -BR, y: BH }, { x: -BR, y: 0 }, { x: BR, y: 0 }, { x: BR, y: BH }], 'rgba(201,211,223,0.85)', 4);
-    pen.poly([...pts, { x: BR, y: 0 }, { x: -BR, y: 0 }], { fill: 'rgba(79,195,247,0.35)' });
-    pen.line(pts, C.ball, 3);
-    pen.line([{ x: 0, y: -0.04 }, { x: 0, y: BH + 0.05 }], 'rgba(255,255,255,0.25)', 1.2, [4, 5]);
-    pen.dot(p, C.ink, 7);
-    pen.arrow(p, { x: 0, y: -u }, C.ink, 3, 'weight');
-    const n = { x: -Math.sin(tilt), y: Math.cos(tilt) }; // outward from the water, at right angles to the surface
-    pen.arrow(p, V.mul(n, u / Math.cos(tilt)), C.ball, 3, 'push of the water');
-    if (i === 0) {
-      pen.arrow(p, { x: -u * Math.tan(tilt), y: 0 }, C.you, 3.5, 'net: toward the axis');
-      pen.text('⊙ moving toward you', { x: p.x, y: p.y }, { dx: 8, dy: -22, size: 10.5, color: 'rgba(255,255,255,0.6)', align: 'left' });
-      pen.note('Not turning: the net force is the inward pull that turns the water');
-    } else {
-      pen.arrow(p, { x: u * Math.tan(tilt), y: 0 }, C.friend, 3, 'centrifugal (pretend)');
-      pen.arrow(p, { x: u * Math.tan(tilt), y: -u }, C.spin, 3, 'effective gravity');
-      pen.note('Turning with the water: it is at rest, so the forces add up to zero');
-    }
-  }
+  const p = { x: rp, y: surface(rp, w) };
+  pen.line([{ x: -BR, y: BH }, { x: -BR, y: 0 }, { x: BR, y: 0 }, { x: BR, y: BH }], 'rgba(201,211,223,0.85)', 4);
+  pen.poly([...pts, { x: BR, y: 0 }, { x: -BR, y: 0 }], { fill: 'rgba(79,195,247,0.35)' });
+  pen.line(pts, C.ball, 3);
+  pen.line([{ x: 0, y: -0.04 }, { x: 0, y: BH + 0.05 }], 'rgba(255,255,255,0.25)', 1.2, [4, 5]);
+  pen.dot(p, C.ink, 7);
+  pen.arrow(p, { x: 0, y: -u }, C.ink, 3, 'weight');
+  const n = { x: -Math.sin(tilt), y: Math.cos(tilt) };
+  pen.arrow(p, V.mul(n, u / Math.cos(tilt)), C.ball, 3, 'push of the water');
+  pen.arrow(p, { x: u * Math.tan(tilt), y: 0 }, C.friend, 3, 'centrifugal (pretend)');
+  pen.arrow(p, { x: u * Math.tan(tilt), y: -u }, C.spin, 3, 'effective gravity');
+  pen.note('Turning with the water: it is at rest, so the forces add up to zero');
+
   const rim = surface(BR, w), mid = surface(0, w);
   app.explain(`${nums([['rim above the middle', fmt.dist(rim - mid)], ['slope at the spot', `${(tilt / Math.PI * 180).toFixed(0)}°`], ['spin', `${bps.toFixed(2)}`, 'turns a second']])}
-    <p><b>Left:</b> a bit of water on the surface has two forces: its weight, and the push of the water below, at right angles to the surface. Because the surface is tilted, the push leans toward the axis. The two add up to a net force <b>toward the axis</b>, exactly the pull needed to keep it going around. The surface tilts just enough: tan(slope) = ω²r / g.</p>
+    <p><b>Left:</b> the water turns around the axis as one piece. A bit of water on the surface has two forces: its weight, and the push of the water below, at right angles to the surface. Because the surface is tilted, the push leans toward the axis. The two add up to a net force <b>toward the axis</b>, exactly the pull needed to keep it going around. The surface tilts just enough: tan(slope) = ω²r / g.</p>
     <p><b>Right:</b> in the turning frame the water is at rest. The pretend centrifugal force joins the weight, and their sum, the <b>effective gravity</b>, points straight into the surface. The water settles so that its surface is level across the effective gravity. That makes a parabola. Liquid-mirror telescopes use it: a spinning dish of mercury is a perfect parabolic mirror.</p>`);
 }
 
@@ -211,7 +251,7 @@ Spin.run((now) => {
   tr.step(now);
   const m = ui.v.mode;
   if (m === 'string') drawString(dt);
-  else if (m === 'bucket') drawBucket();
+  else if (m === 'bucket') drawBucket(dt);
   else drawRotor(dt);
 });
 </script>

@@ -232,6 +232,7 @@ function setupMode() {
   if (m === 'bike') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.62fr)'); app.caption(0, 'The bicycle from behind'); app.caption(1, 'The bicycle from above'); tr.setGo('Give it a push'); }
   else { app.show(2, 2); app.layout(2, 'minmax(0, 1fr)'); app.caption(0, 'The coin (drag to turn the view)'); app.caption(1, 'The same, on log scales'); tr.setGo('Spin it'); }
   tr.loopBox.parentElement.hidden = false;
+  cam.setActive(m === 'coin');
   tr.reset(); B = null; coinPhase = 0;
   if (m === 'bike') initBike();
 }

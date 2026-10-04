@@ -43,6 +43,7 @@ function setupMode() {
   tr.loopBox.parentElement.hidden = m === 'skater';
   const caps = { skater: ['The skater from above', 'What changes as the arms move'], cat: ['The cat, seen from in front of it', 'Turn of each half'], racket: ['Seen from outside, not turning', 'Seen from the box itself'] }[m];
   app.caption(0, caps[0]); app.caption(1, caps[1]);
+  camL.setActive(m === 'racket'); camR.setActive(m === 'racket');
   tr.reset(); tr.running = m === 'skater';
   if (m === 'cat') resetCat();
 }

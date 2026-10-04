@@ -4,7 +4,7 @@
   --ball: #4fc3f7; --ink: #ffa24a; --aim: #c9d3df; --you: #9be7a6; --friend: #f06292; --spin: #ffd54f; --warn: #ff8a66; }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: radial-gradient(1200px 700px at 70% -10%, #0e1a2e 0%, var(--bg) 60%) fixed; color: var(--text); font: 14px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; }
-body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+body { display: flex; flex-direction: column; height: 100vh; height: 100dvh; overflow: hidden; }
 .app { flex: 1; min-height: 0; display: grid; grid-template-columns: 340px 1fr; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; }
 [hidden] { display: none !important; }
@@ -84,16 +84,26 @@ main { display: grid; grid-template-rows: 1fr auto; gap: 12px; padding: 12px; mi
 .num small { display: block; font-family: system-ui, sans-serif; color: var(--muted); font-size: 11px; }
 .num b { font-size: 18px; color: var(--spin); }
 
-@media (max-width: 900px) {
+/* A narrow window, or a short one (a phone held sideways): stack everything and let the page scroll.
+   The title and tabs come first, then the play bar (it stays in view at the top while you scroll), then the settings. */
+@media (max-width: 900px), (max-height: 560px) {
   body { display: block; height: auto; overflow: auto; }
-  .app { display: block; }
-  #controls { margin: 12px; overflow: visible; }
-  #ctlScroll { overflow: visible; }
-  #transport { position: sticky; bottom: 0; z-index: 5; }
-  main { padding: 0 12px 12px; }
+  .app { display: flex; flex-direction: column; }
+  #controls { display: contents; }
+  #ctlHead { order: 1; margin: 12px 12px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 14px 14px 0 0; }
+  #transport { order: 2; position: sticky; top: 0; z-index: 5; margin: 0 12px; border: 1px solid var(--line); border-top: 0; border-radius: 0; box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35); }
+  #ctlScroll { order: 3; overflow: visible; margin: 0 12px 12px; background: var(--panel); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 14px 14px; }
+  main { order: 4; padding: 0 12px 12px; }
   #views { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
   .view { grid-column: auto !important; }
-  .view canvas { height: 78vw; flex: none; }
-  .view.short canvas { height: 52vw; }
+  .view canvas { height: min(78vw, 88vh); flex: none; }
+  .view.short canvas { height: min(52vw, 70vh); }
   #explain { max-height: none; }
+}
+@media (max-width: 640px) { #transport { top: 44px; } }
+@media (max-height: 560px) {
+  #transport { padding: 8px 14px; display: flex; align-items: center; gap: 14px; }
+  #transport .btns { flex: 1.4; }
+  #transport .row { margin-top: 0; flex: 1; }
+  #ctlHead { padding: 10px 14px 8px; }
 }

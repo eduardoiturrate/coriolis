@@ -32,12 +32,14 @@ ui.slider('k', { label: 'Number of circles', min: 1, max: 100, step: 1, value: 2
 ui.chips([{ text: '2', set: { k: 2 } }, { text: '5', set: { k: 5 } }, { text: '20', set: { k: 20 } }, { text: '100', set: { k: 100 } }], { show: is('draw') });
 ui.hint('Choose “Draw your own”, then draw a closed shape in the left view with the mouse or a finger.', { show: (v) => v.mode === 'draw' && v.shape === 'free' });
 
-ui.on((id) => { if (id === 'mode') setup(); if (id === 'shape' || id === 'mode') prepareShape(); tr.restart(); });
+ui.on((id) => { if (id === 'mode') setup(); if (id === 'shape' || id === 'mode') prepareShape(); syncPointer(); tr.restart(); });
 function setup() {
   const m = ui.v.mode;
   app.caption(0, m === 'wave' ? 'Circles on circles' : 'Circles that draw the picture');
   app.caption(1, m === 'wave' ? 'The sum of the circles, and its parts' : 'The picture the circles make, and how big each circle is');
+  syncPointer();
 }
+function syncPointer() { if (pens[0].setPointerActive) pens[0].setPointerActive(ui.v.mode === 'draw' && ui.v.shape === 'free'); }
 
 // ---------- Waves ----------
 

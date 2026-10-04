@@ -48,6 +48,7 @@ function setup() {
     st: ['First frame: space across, time up', 'Second frame, which moves'],
   }[m];
   app.caption(0, caps[0]); app.caption(1, caps[1]);
+  pens.forEach((p) => { if (p.setPointerActive) p.setPointerActive(m === 'st'); });
 }
 
 // ---------- Light clock ----------

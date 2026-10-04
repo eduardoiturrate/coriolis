@@ -345,14 +345,17 @@
     pointer(h) {
       const c = this.canvas;
       c.style.touchAction = 'none';
+      let active = true;
+      /** Turn the mouse and touch input on or off. When it is off, the page scrolls normally under a finger. */
+      this.setPointerActive = (on) => { active = on; c.style.touchAction = on ? 'none' : ''; };
       const at = (e) => {
         const r = c.getBoundingClientRect();
         const x = ((e.clientX - r.left) * c.width) / r.width, y = ((e.clientY - r.top) * c.height) / r.height;
         return [this.S(x, y), e, { x, y }];
       };
       let down = false;
-      c.addEventListener('pointerdown', (e) => { down = true; c.setPointerCapture(e.pointerId); h.down && h.down(...at(e)); });
-      c.addEventListener('pointermove', (e) => { if (down) h.move && h.move(...at(e)); else h.hover && h.hover(...at(e)); });
+      c.addEventListener('pointerdown', (e) => { if (!active) return; down = true; c.setPointerCapture(e.pointerId); h.down && h.down(...at(e)); });
+      c.addEventListener('pointermove', (e) => { if (!active) return; if (down) h.move && h.move(...at(e)); else h.hover && h.hover(...at(e)); });
       const up = (e) => { if (!down) return; down = false; h.up && h.up(...at(e)); };
       c.addEventListener('pointerup', up);
       c.addEventListener('pointercancel', up);
@@ -446,10 +449,11 @@
       this.zoomStart = this.dist;
       const c = pen.canvas;
       c.style.touchAction = 'none';
+      this.active = true;
       let last = null;
-      c.addEventListener('pointerdown', (e) => { last = [e.clientX, e.clientY]; c.setPointerCapture(e.pointerId); });
+      c.addEventListener('pointerdown', (e) => { if (!this.active) return; last = [e.clientX, e.clientY]; c.setPointerCapture(e.pointerId); });
       c.addEventListener('pointermove', (e) => {
-        if (!last) return;
+        if (!last || !this.active) return;
         this.az -= (e.clientX - last[0]) * 0.008;
         this.el = clamp(this.el + (e.clientY - last[1]) * 0.008, -1.5, 1.5);
         last = [e.clientX, e.clientY];
@@ -457,7 +461,8 @@
       const up = () => { last = null; };
       c.addEventListener('pointerup', up);
       c.addEventListener('pointercancel', up);
-      c.addEventListener('wheel', (e) => { e.preventDefault(); this.dist = clamp(this.dist * Math.exp(e.deltaY * 0.001), this.min, this.max); }, { passive: false });
+      this.setActive = (on) => { this.active = on; c.style.touchAction = on ? 'none' : ''; if (!on) last = null; };
+      c.addEventListener('wheel', (e) => { if (!this.active) return; e.preventDefault(); this.dist = clamp(this.dist * Math.exp(e.deltaY * 0.001), this.min, this.max); }, { passive: false });
     }
     /** Compute the camera axes for this frame. Call after pen.begin(). */
     begin() {

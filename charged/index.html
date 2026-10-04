@@ -50,6 +50,7 @@ function setup() {
   tr.setGo('Restart');
   const caps = { b: ['Seen from above: the field points out of the page', 'Speed of the particle'], drift: ['Seen in the lab', 'Seen by someone who moves with the drift'], belt: ['A slice through Earth, with the field lines', 'The same, in 3D (drag to turn)'] }[m];
   app.caption(0, caps[0]); app.caption(1, caps[1]);
+  cam.setActive(m === 'belt');
 }
 
 // ---------- Magnetic field only ----------
