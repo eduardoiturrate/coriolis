@@ -12,7 +12,7 @@
 <body>
 <script src="../shared/spin.js"></script>
 <script>
-const { C, V, fmt, nums, TAU, DEG } = Spin;
+const { C, V, V3, fmt, nums, TAU, DEG } = Spin;
 const G0 = 9.81, MASS = 80;
 
 const app = Spin.app({
@@ -28,7 +28,7 @@ const is = (m) => (v) => v.mode === m;
 
 ui.slider('R', { label: 'Radius of the station', min: 20, max: 500, log: true, value: 100, fmt: (v) => `${v} m` });
 ui.slider('gf', { label: 'Gravity at the floor', min: 0.2, max: 2, step: 0.05, value: 1, fmt: (v) => `${v.toFixed(2)} g` });
-ui.slider('rf', { label: 'Where you are on the pole, from the axis to the floor', min: 0, max: 1, step: 0.01, value: 0.5, fmt: (v) => `${Math.round(v * 100)}% of the way (${Math.round(v * ui.v.R)} m from the axis)`, show: is('weight') });
+ui.slider('rf', { label: 'Where you are on the pole, from the axis to the floor', min: 0, max: 1, step: 0.01, value: 0.7, fmt: (v) => `${Math.round(v * 100)}% of the way (${Math.round(v * ui.v.R)} m from the axis)`, show: is('weight') });
 ui.chips([{ text: 'At the axis', set: { rf: 0 } }, { text: 'Halfway', set: { rf: 0.5 } }, { text: 'At the floor', set: { rf: 1 } }], { show: is('weight') });
 ui.slider('u', { label: 'Speed you push off at', min: 0.1, max: 3, step: 0.1, value: 1, fmt: (v) => `${v.toFixed(1)} m/s`, show: is('drift') });
 ui.slider('ul', { label: 'Speed you climb down at', min: 0.2, max: 2, step: 0.1, value: 0.6, fmt: (v) => `${v.toFixed(1)} m/s`, show: is('ladder') });
@@ -39,8 +39,10 @@ function setup() {
   const m = ui.v.mode;
   tr.setGo(m === 'weight' ? 'Restart' : m === 'drift' ? 'Let go' : 'Start climbing');
   tr.loopBox.parentElement.hidden = m === 'weight';
-  if (m === 'weight') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.45fr)'); app.caption(0, 'Seen from outside, not turning'); app.caption(1, 'Seen from the station'); app.caption(2, 'Weight and floor speed, from the axis to the floor'); }
-  else { app.show(2, 2); app.layout(2, 'minmax(0, 1fr)'); app.caption(0, 'Seen from outside, not turning'); app.caption(1, 'Seen from the station'); }
+  const left = m === 'drift' ? 'Seen from outside, not turning' : 'Seen from outside, not turning (drag to turn the view)';
+  if (m === 'weight') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.45fr)'); app.caption(0, left); app.caption(1, 'Seen from the station'); app.caption(2, 'Weight and floor speed, from the axis to the floor'); }
+  else { app.show(2, 2); app.layout(2, 'minmax(0, 1fr)'); app.caption(0, left); app.caption(1, 'Seen from the station'); }
+  cam.setActive(m !== 'drift');
 }
 
 const params = () => { const R = ui.v.R, w = Math.sqrt((ui.v.gf * G0) / R); return { R, w }; };
@@ -58,6 +60,28 @@ function stars(p, R, ang) {
   for (let k = 0; k < 32; k++) p.dot(V.polar(R * (1.2 + 0.05 * (k % 3)), ang + (k * TAU) / 32 + (k % 5) * 0.03), 'rgba(255,255,255,0.55)', k % 4 === 0 ? 3 : 2);
 }
 
+// ---------- The drum in 3D ----------
+// The station is a drum. Its floor is the inside of the wall. The axis runs along z, and all lengths here are in station radii.
+// The flat pictures are the view along the axis (the x-y plane, z = 0).
+
+const HZ = 0.55; // half the length of the drum
+const cam = new Spin.Cam3(pens[0], { az: 0.75, el: 0.5, dist: 4.4, fov: 34, min: 2.2, max: 10 });
+const star3 = (() => { const r = Spin.rng(5), o = []; for (let i = 0; i < 70; i++) { const z = 2 * r() - 1, a = TAU * r(), s = Math.sqrt(1 - z * z); o.push({ x: 3.2 * s * Math.cos(a), y: 3.2 * s * Math.sin(a), z: 3.2 * z, big: r() < 0.25 }); } return o; })();
+function drum3(th) {
+  star3.forEach((q) => cam.dot(q, 'rgba(255,255,255,0.5)', q.big ? 2.6 : 1.8));
+  const NA = 48, faces = [];
+  for (let a = 0; a < NA; a++) {
+    const a0 = (a / NA) * TAU, a1 = ((a + 1) / NA) * TAU;
+    faces.push({ pts: [{ x: Math.cos(a0), y: Math.sin(a0), z: -HZ }, { x: Math.cos(a1), y: Math.sin(a1), z: -HZ }, { x: Math.cos(a1), y: Math.sin(a1), z: HZ }, { x: Math.cos(a0), y: Math.sin(a0), z: HZ }], fill: 'rgba(155,231,166,0.07)' });
+  }
+  cam.faces(faces);
+  const ring = (z) => { const o = []; for (let k = 0; k <= 60; k++) o.push({ x: Math.cos((k / 60) * TAU), y: Math.sin((k / 60) * TAU), z }); return o; };
+  cam.line(ring(-HZ), 'rgba(155,231,166,0.85)', 3); cam.line(ring(HZ), 'rgba(155,231,166,0.85)', 3);
+  for (const z of [-HZ, HZ]) for (let k = 0; k < 8; k++) cam.line([{ x: 0, y: 0, z }, { x: Math.cos(th + (k * TAU) / 8), y: Math.sin(th + (k * TAU) / 8), z }], 'rgba(255,255,255,0.16)', 1.2);
+  for (let k = 0; k < 12; k++) { const a = th + (k * TAU) / 12; cam.line([{ x: Math.cos(a), y: Math.sin(a), z: -HZ }, { x: Math.cos(a), y: Math.sin(a), z: HZ }], 'rgba(155,231,166,0.28)', 1.2); }
+  cam.line([{ x: 0, y: 0, z: -HZ * 1.2 }, { x: 0, y: 0, z: HZ * 1.2 }], '#c9d3df', 3);
+}
+
 // ---------- Weight and view ----------
 
 function drawWeight() {
@@ -65,23 +89,22 @@ function drawWeight() {
   const r = ui.v.rf * R, t = tr.t, th = w * t;
   const gfelt = (w * w * r) / G0, vfloor = w * r, vrim = w * R;
   const box = R * 1.38;
-  const L = pens[0].begin().box(-box, box, -box, box, 8);
-  stars(L, R, 0); station(L, R, th);
-  for (let k = 0; k < 4; k++) { const a = th + (k * TAU) / 4, q = V.polar(R, a); L.arrow(q, V.mul(V.polar(1, a + Math.PI / 2), R * 0.2), C.ball, 2.6, k === 0 ? `${vrim.toFixed(0)} m/s` : ''); }
-  L.circle({ x: 0, y: 0 }, R * 0.05, { fill: '#fff', stroke: '#fff', width: 1 });
-  L.text('you, floating at the hub', { x: 0, y: 0 }, { dy: 18, size: 11, color: '#fff' });
-  // A pole from the hub to the floor, turning with the station. You hold on to it. The floor is only the outer ring.
-  L.line([{ x: 0, y: 0 }, V.polar(R * 0.985, th)], '#dfe6f0', 4.5);
-  L.text('pole', V.polar(R * 0.8, th), { dy: -12, size: 11, color: '#dfe6f0' });
-  L.text('floor', V.polar(R * 1.0, th + 0.22), { size: 11, color: C.you });
+  pens[0].begin(); cam.begin();
+  drum3(th);
+  const er = { x: Math.cos(th), y: Math.sin(th), z: 0 }, et = { x: -Math.sin(th), y: Math.cos(th), z: 0 };
+  // A pole from the hub to the floor, turning with the drum. You hold on to it. The floor is only the wall.
+  cam.line([{ x: 0, y: 0, z: 0 }, V3.mul(er, 0.985)], '#dfe6f0', 4.5);
+  cam.text('floor (the inside of the wall)', { x: Math.cos(th + 0.6), y: Math.sin(th + 0.6), z: HZ }, { dy: -10, size: 11, color: C.you });
+  for (let k = 0; k < 4; k++) { const a = th + (k * TAU) / 4; cam.arrow({ x: Math.cos(a), y: Math.sin(a), z: 0 }, { x: -Math.sin(a) * 0.3, y: Math.cos(a) * 0.3, z: 0 }, C.ball, 2.6, k === 0 ? `${vrim.toFixed(0)} m/s` : ''); }
+  cam.dot({ x: 0, y: 0, z: 0 }, '#fff', 6.5);
+  cam.text('you, floating at the hub', { x: 0, y: 0, z: 0 }, { dx: -78, dy: 24, size: 11, color: '#fff' });
   if (r > 0.5) {
-    const q = V.polar(r, th), atFloor = ui.v.rf > 0.97;
-    L.circle({ x: 0, y: 0 }, r, { stroke: 'rgba(255,162,74,0.35)', width: 1.4, dash: [4, 5] });
-    L.arrow(q, V.mul(V.polar(1, th + Math.PI / 2), R * 0.2 * (vfloor / Math.max(vrim, 1e-9))), C.you, 3, '');
-    L.arrow(q, V.mul(V.polar(1, th + Math.PI), R * 0.2 * (gfelt / ui.v.gf)), C.friend, 3.2, atFloor ? 'the floor pushes you in' : 'the pole pushes you in');
-    L.dot(q, C.ink, 7);
+    const f = ui.v.rf, atFloor = f > 0.97, P = V3.mul(er, f);
+    cam.arrow(P, V3.mul(et, 0.3 * (vfloor / Math.max(vrim, 1e-9))), C.you, 3, '');
+    cam.arrow(P, V3.mul(er, -0.3 * (gfelt / ui.v.gf)), C.friend, 3.2, atFloor ? 'the floor pushes you in' : 'the pole pushes you in');
+    cam.dot(P, C.ink, 7);
   }
-  L.note('You are not turning: the station turns around you, and the rim rushes past');
+  pens[0].note('You are not turning: the drum turns around you, and its wall rushes past');
 
   const Rv = pens[1].begin().box(-box, box, -box, box, 8);
   stars(Rv, R, -th); station(Rv, R, 0);
@@ -93,7 +116,7 @@ function drawWeight() {
   Rv.text('pole', { x: R * 0.8, y: 0 }, { dy: -12, size: 11, color: '#dfe6f0' });
   if (r > 0.5) {
     const q = { x: r, y: 0 };
-    Rv.arrow(q, { x: R * 0.2 * (gfelt / ui.v.gf), y: 0 }, C.ink, 3.5, 'weight (you feel pulled down the pole)');
+    Rv.arrow(q, { x: R * 0.2 * (gfelt / ui.v.gf), y: 0 }, C.ink, 3.5, 'weight');
     Rv.dot(q, C.ink, 7);
   }
   Rv.note('The station is still. The stars wheel round, and you at the hub turn');
@@ -184,8 +207,13 @@ function drawLadder() {
   const th = w * ts;
   const r = V.len(pin);
 
-  const L = pens[0].begin().box(-box, box, -box, box, 8);
-  stars(L, R, 0); station(L, R, th);
+  pens[0].begin(); cam.begin();
+  drum3(th);
+  const to3 = (q) => ({ x: q.x / R, y: q.y / R, z: 0 });
+  // The ladder is a pole with rungs, turning with the drum.
+  const ea = { x: Math.cos(th), y: Math.sin(th), z: 0 };
+  cam.line([{ x: 0, y: 0, z: 0 }, V3.mul(ea, 0.985)], '#dfe6f0', 4);
+  for (let k = 1; k < 20; k++) cam.line([{ x: (k / 20) * ea.x, y: (k / 20) * ea.y, z: -0.035 }, { x: (k / 20) * ea.x, y: (k / 20) * ea.y, z: 0.035 }], 'rgba(223,230,240,0.7)', 1.5);
   // The path in space so far.
   const path = [];
   if (!released) { for (let s = 0; s <= ts + 1e-9; s += Math.max(ts / 200, 1e-3)) path.push(V.polar(r0 + u * s, w * s)); }
@@ -194,14 +222,15 @@ function drawLadder() {
     for (let s = 0; s <= t0 + 1e-9; s += Math.max(t0 / 150, 1e-3)) path.push(V.polar(r0 + u * s, w * s));
     for (let s = 0; s <= Math.min(tr.t, tEnd) - t0 + 1e-9; s += 0.05) path.push(V.add(p0, V.mul(v0, s)));
   }
-  L.line(path, C.ink, 3);
-  L.dot(pin, C.ink, 7); L.text('you', pin, { dy: -14, size: 11, color: C.ink });
-  const er = V.norm(pin), et = { x: -er.y, y: er.x };
+  cam.line(path.map(to3), C.ink, 3);
+  const P3 = to3(pin);
+  cam.dot(P3, C.ink, 7); cam.text('you', P3, { dy: -14, size: 11, color: C.ink });
   if (onLadder && r > 0.5) {
-    L.arrow(pin, V.mul(er, -R * 0.22 * (r / R)), C.friend, 3.2, 'ladder pushes in');
-    L.arrow(pin, V.mul(et, R * 0.22 * 0.35), C.spin, 3.2, 'and forward (drawn 10× larger)');
+    const er3 = V3.norm(P3), et3 = { x: -er3.y, y: er3.x, z: 0 };
+    cam.arrow(P3, V3.mul(er3, -0.3 * (r / R)), C.friend, 3.2, 'ladder pushes in');
+    cam.arrow(P3, V3.mul(et3, 0.3 * 0.35), C.spin, 3.2, 'and forward (drawn 10× larger)');
   }
-  L.note(onLadder ? 'The ladder turns with the station, and carries you around' : 'Let go: you fly off straight');
+  pens[0].note(onLadder ? 'The ladder turns with the drum, and carries you around' : 'Let go: you fly off straight');
 
   const Rv = pens[1].begin().box(-box, box, -box, box, 8);
   stars(Rv, R, -th); station(Rv, R, 0);
