@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Spirograph · Spin</title>
+<meta name="description" content="A gear rolling inside or around a ring draws a rosette. The pen is two turning arrows added together, and the numbers of teeth decide how many petals there are and when the curve closes." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+const gcd = (a, b) => (b ? gcd(b, a % b) : a);
+
+const app = Spin.app({
+  slug: 'spirograph',
+  sub: 'A toothed wheel rolls inside (or outside) a fixed ring. A pen in a hole of the wheel draws the curve.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Draw again', speed: { min: 0.2, max: 4, value: 1, step: 0.1 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['in', 'Wheel inside the ring'], ['out', 'Wheel outside the ring']]);
+
+ui.slider('R', { label: 'Teeth on the fixed ring', min: 30, max: 120, step: 1, value: 96, fmt: (v) => String(v) });
+ui.slider('r', { label: 'Teeth on the rolling wheel', min: 8, max: 100, step: 1, value: 63, fmt: (v) => String(v), hint: (v) => (v.mode === 'in' && v.r >= v.R ? 'Inside the ring, the wheel must be smaller than the ring: it is set to one tooth less.' : '') });
+ui.slider('d', { label: 'Where the pen is, from the wheel’s middle to its rim', min: 0.05, max: 1.4, step: 0.05, value: 0.7, fmt: (v) => (v === 1 ? '1.00 (on the rim)' : v > 1 ? `${v.toFixed(2)} (beyond the rim)` : v.toFixed(2)) });
+ui.chips([{ text: 'Classic 96 / 63', set: { R: 96, r: 63, d: 0.7 } }, { text: 'Three lobes 96 / 32', set: { R: 96, r: 32, d: 0.8 } }, { text: 'Five lobes 100 / 40', set: { R: 100, r: 40, d: 0.6 } }, { text: 'Straight lines 96 / 48, rim', set: { R: 96, r: 48, d: 1 } }]);
+ui.check('arm', 'Show the arm to the pen', true);
+
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  app.caption(0, m === 'in' ? 'The wheel rolls inside the ring' : 'The wheel rolls around the outside of the ring');
+  app.caption(1, 'The same pen: two arrows turning, added together');
+  tr.setGo('Draw again');
+}
+
+let cache = null;
+function params() {
+  const inside = ui.v.mode === 'in';
+  const R = ui.v.R, r = inside ? Math.min(ui.v.r, R - 1) : ui.v.r, d = ui.v.d * r;
+  const g = gcd(R, r), tEnd = (TAU * r) / g;
+  return { inside, R, r, d, g, tEnd };
+}
+// The wheel's middle goes round at rate 1. The wheel turns as it rolls, so the pen turns about the middle at rate k.
+const kRate = (P) => (P.inside ? -(P.R - P.r) / P.r : (P.R + P.r) / P.r);
+const big = (P) => (P.inside ? P.R - P.r : P.R + P.r);
+const penAt = (P, t) => { const c = V.polar(big(P), t), q = V.polar(P.d, kRate(P) * t); return { c, q, p: V.add(c, P.inside ? q : V.mul(q, -1)) }; };
+function curve(P) {
+  const key = `${P.inside}|${P.R}|${P.r}|${P.d.toFixed(3)}`;
+  if (cache && cache.key === key) return cache.pts;
+  const n = Math.max(800, Math.min(60000, Math.ceil(P.tEnd / 0.03)));
+  const pts = []; for (let i = 0; i <= n; i++) pts.push(penAt(P, (P.tEnd * i) / n).p);
+  cache = { key, pts };
+  return pts;
+}
+
+function draw(now) {
+  tr.step(now);
+  const P = params();
+  const dur = 14;
+  const prog = Math.min(1, tr.running || tr.endedAt ? tr.t / dur : 1);
+  if (tr.running && tr.t > dur + 1.5) tr.finish();
+  const t = P.tEnd * prog;
+  const pts = curve(P), upto = Math.max(2, Math.floor(prog * (pts.length - 1)));
+  const now2 = penAt(P, t);
+  const ext = (P.inside ? P.R : P.R + 2 * P.r) * 1.08 + P.d * 0.2;
+
+  const L = pens[0].begin().box(-ext, ext, -ext, ext, 10);
+  L.circle({ x: 0, y: 0 }, P.R, { stroke: 'rgba(255,255,255,0.4)', width: 3 });
+  L.circle({ x: 0, y: 0 }, P.R * 1.0, { stroke: 'rgba(155,231,166,0.12)', width: 10 });
+  L.line(pts.slice(0, upto + 1), C.ink, 1.8);
+  const wc = now2.c;
+  L.circle(wc, P.r, { fill: 'rgba(79,195,247,0.1)', stroke: C.ball, width: 2.4 });
+  // A mark on the wheel's rim, to show how it turns.
+  const phi = kRate(P) * t + (P.inside ? 0 : Math.PI);
+  L.dot(V.add(wc, V.polar(P.r, P.inside ? phi : -phi - Math.PI + Math.PI)), 'rgba(255,255,255,0.6)', 3);
+  if (ui.v.arm) L.line([wc, now2.p], '#fff', 2);
+  L.dot(wc, C.ball, 4);
+  L.dot(now2.p, '#fff', 6.5);
+  L.note(`${P.R} teeth on the ring, ${P.r} on the wheel`);
+
+  // Right: the pen as two arrows. The first reaches the wheel's middle. The second goes from the middle to the pen.
+  const R2 = pens[1].begin().box(-ext, ext, -ext, ext, 10);
+  R2.circle({ x: 0, y: 0 }, big(P), { stroke: 'rgba(255,255,255,0.12)', width: 1.2, dash: [4, 5] });
+  R2.line(pts, 'rgba(255,162,74,0.22)', 1.2);
+  R2.line(pts.slice(0, upto + 1), C.ink, 2.2);
+  R2.arrow({ x: 0, y: 0 }, now2.c, C.ball, 3.5, `${big(P)}`);
+  R2.arrow(now2.c, V.sub(now2.p, now2.c), C.spin, 3.5, '');
+  R2.circle(now2.c, P.d, { stroke: 'rgba(255,213,79,0.25)', width: 1, dash: [3, 4] });
+  R2.dot(now2.p, '#fff', 6.5);
+  R2.note(`Arrow 1: length ${big(P)}, turns once. Arrow 2: length ${P.d.toFixed(1)}, turns ${kRate(P).toFixed(2)} times (${kRate(P) < 0 ? 'the other way' : 'the same way'})`);
+
+  const lobes = P.R / P.g, trips = P.r / P.g;
+  const ratio = P.R / P.r;
+  const special = P.inside && Math.abs(P.d - P.r) < 1e-6
+    ? (Math.abs(ratio - 2) < 1e-9 ? 'With the pen on the rim of a wheel half the size of the ring, the curve is a <b>straight line</b> (the Cardano circles).' : `With the pen on the rim, the curve has sharp points: a <b>hypocycloid</b> (${lobes} points).`)
+    : '';
+  app.explain(`${nums([['teeth: ring, wheel', `${P.R}, ${P.r}`], ['they share', `${P.g}`, 'as a common divisor'], ['lobes (petals)', String(lobes)], ['it closes after', `${trips}`, trips === 1 ? 'trip round the ring' : 'trips round the ring']])}
+    <p>The wheel rolls without slipping, so every tooth that touches the ring is matched by a tooth on the wheel. After the wheel has gone once round the ring, it has turned ${P.inside ? `(${P.R} − ${P.r}) / ${P.r} = ${((P.R - P.r) / P.r).toFixed(2)}` : `(${P.R} + ${P.r}) / ${P.r} = ${((P.R + P.r) / P.r).toFixed(2)}`} times about its own middle. That is not usually a whole number, so the pen does not come back to where it started: the pattern is not closed. It closes only when both counts are whole numbers: after ${trips} trips round the ring and ${P.inside ? (P.R - P.r) / P.g : (P.R + P.r) / P.g} turns of the wheel. That is why the number of teeth matters, and why numbers with a large common divisor (like 96 and 32) give few lobes and numbers with none (like 97 and 63) give a dense pattern.</p>
+    <p>The right picture shows what the pen really is: <b>two arrows turning</b>, added together. The first, of length ${big(P)}, carries the wheel's middle round the ring. The second, of length ${P.d.toFixed(1)} (the distance of the pen from the wheel's middle), turns at its own rate. Their sum, a point on the plane, is a sum of two complex numbers each of the form r e^(iωt). It is the same idea as the circles of Fourier circles, and as the cycloid on the Rolling wheels page, which is the case of a wheel rolling on a line. ${special}</p>`);
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

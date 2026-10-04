@@ -21,12 +21,15 @@ const app = Spin.app({
   go: 'Start', speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
 });
 const { ui, tr, pens } = app;
-app.modes('mode', [['clock', 'Light clock'], ['train', 'Train and lightning'], ['st', 'Spacetime diagram']]);
+app.modes('mode', [['clock', 'Light clock'], ['train', 'Train and lightning'], ['st', 'Spacetime diagram'], ['boost', 'Boosts are rotations']]);
 const is = (m) => (v) => v.mode === m;
 const gam = (b) => 1 / Math.sqrt(1 - b * b);
 
-ui.slider('beta', { label: 'Speed, as a part of the speed of light', min: 0, max: 0.99, step: 0.01, value: 0.8, fmt: (v) => `${v.toFixed(2)} c`, show: (v) => v.mode !== 'st', hint: (v) => `Time stretches by γ = ${gam(v.beta).toFixed(2)}.` });
-ui.chips([{ text: '0.5', set: { beta: 0.5 } }, { text: '0.8', set: { beta: 0.8 } }, { text: '0.9', set: { beta: 0.9 } }, { text: '0.99', set: { beta: 0.99 } }], { show: (v) => v.mode !== 'st' });
+ui.slider('beta', { label: 'Speed, as a part of the speed of light', min: 0, max: 0.99, step: 0.01, value: 0.8, fmt: (v) => `${v.toFixed(2)} c`, show: (v) => v.mode === 'clock' || v.mode === 'train', hint: (v) => `Time stretches by γ = ${gam(v.beta).toFixed(2)}.` });
+ui.chips([{ text: '0.5', set: { beta: 0.5 } }, { text: '0.8', set: { beta: 0.8 } }, { text: '0.9', set: { beta: 0.9 } }, { text: '0.99', set: { beta: 0.99 } }], { show: (v) => v.mode === 'clock' || v.mode === 'train' });
+ui.slider('u1', { label: 'First turn, or first boost', min: 0, max: 2, step: 0.05, value: 0.9, fmt: (v) => `${(v / DEG).toFixed(0)}\u00b0 of turn, or a speed of ${Math.tanh(v).toFixed(2)} c`, show: (v) => v.mode === 'boost' });
+ui.slider('u2', { label: 'Second turn, or second boost', min: 0, max: 2, step: 0.05, value: 0.9, fmt: (v) => `${(v / DEG).toFixed(0)}\u00b0 of turn, or a speed of ${Math.tanh(v).toFixed(2)} c`, show: (v) => v.mode === 'boost' });
+ui.chips([{ text: 'Two boosts of 0.9 c', set: { u1: Math.atanh(0.9), u2: Math.atanh(0.9) } }, { text: 'Two small ones', set: { u1: 0.2, u2: 0.2 } }, { text: 'Two big ones', set: { u1: 1.5, u2: 1.5 } }], { show: (v) => v.mode === 'boost' });
 ui.slider('sb', { label: 'Relative speed of the two frames', min: -0.95, max: 0.95, step: 0.01, value: 0.5, fmt: (v) => `${v.toFixed(2)} c`, show: is('st') });
 ui.chips([{ text: 'Same frame 0', set: { sb: 0 } }, { text: 'Fast 0.8', set: { sb: 0.8 } }, { text: 'Fast the other way −0.8', set: { sb: -0.8 } }], { show: is('st') });
 ui.section('Events', { show: is('st') });
@@ -40,12 +43,15 @@ ui.slider('bt', { label: 'A', min: -3.5, max: 3.5, step: 0.05, value: 2.2, fmt: 
 ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
 function setup() {
   const m = ui.v.mode;
-  tr.go.hidden = m === 'st'; tr.pauseBtn.hidden = m === 'st'; tr.loopBox.parentElement.hidden = m === 'st'; tr.speedBox.parentElement.hidden = m === 'st';
+  const still = m === 'st' || m === 'boost';
+  Spin.$('transport').hidden = still;
+  tr.go.hidden = still; tr.pauseBtn.hidden = still; tr.loopBox.parentElement.hidden = still; tr.speedBox.parentElement.hidden = still;
   tr.setGo(m === 'clock' ? 'Start both clocks' : 'Strike!');
   const caps = {
     clock: ['In the frame of clock A (orange)', 'In the frame of clock B (blue)'],
     train: ['In the frame of the platform', 'In the frame of the train'],
     st: ['First frame: space across, time up', 'Second frame, which moves'],
+    boost: ['Turning the plane: points stay on circles', 'Boosting spacetime: points stay on hyperbolas'],
   }[m];
   app.caption(0, caps[0]); app.caption(1, caps[1]);
   pens.forEach((p) => { if (p.setPointerActive) p.setPointerActive(m === 'st'); });
@@ -238,10 +244,55 @@ function stPointers() {
 }
 stPointers();
 
+// ---------- Boosts are rotations ----------
+
+function arc2(p, r, a0, a1, col) { const o = []; const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / 0.05)); for (let k = 0; k <= n; k++) o.push(V.polar(r, a0 + ((a1 - a0) * k) / n)); p.line(o, col, 2.5); }
+function drawBoost() {
+  const { u1, u2 } = ui.v, th = u1 + u2;
+  const grid = (P, ext) => { P.box(-ext, ext, -ext, ext, 14); for (let k = -Math.floor(ext); k <= Math.floor(ext); k++) { P.line([{ x: k, y: -ext }, { x: k, y: ext }], 'rgba(255,255,255,0.05)', 1); P.line([{ x: -ext, y: k }, { x: ext, y: k }], 'rgba(255,255,255,0.05)', 1); } };
+
+  // Left: turning the plane by th. A point keeps its distance from the middle.
+  const L = pens[0]; grid(L.begin(), 2.6);
+  const Q = { x: 1.3, y: 0.7 }, rho = Math.hypot(Q.x, Q.y);
+  L.line([{ x: -2.5, y: 0 }, { x: 2.5, y: 0 }], 'rgba(255,255,255,0.5)', 1.6); L.line([{ x: 0, y: -2.5 }, { x: 0, y: 2.5 }], 'rgba(255,255,255,0.5)', 1.6);
+  L.circle({ x: 0, y: 0 }, rho, { stroke: 'rgba(255,213,79,0.5)', width: 1.8, dash: [5, 4] });
+  const axes = (P, a, col, w) => { P.line([V.polar(-2.6, a), V.polar(2.6, a)], col, w); P.line([V.polar(-2.6, a + Math.PI / 2), V.polar(2.6, a + Math.PI / 2)], col, w); };
+  if (u1 > 0 && u2 > 0) axes(L, u1, 'rgba(79,195,247,0.25)', 1.4);
+  axes(L, th, C.ball, 2.4);
+  L.text("x'", V.polar(2.35, th), { dx: 10, dy: -8, size: 12, color: C.ball }); L.text("y'", V.polar(2.35, th + Math.PI / 2), { dx: 12, dy: 8, size: 12, color: C.ball });
+  L.arrow({ x: 0, y: 0 }, Q, '#fff', 3, ''); L.dot(Q, '#fff', 7); L.text('a fixed point', Q, { dx: 12, dy: -12, size: 11, color: '#fff' });
+  const xq = Q.x * Math.cos(th) + Q.y * Math.sin(th), yq = -Q.x * Math.sin(th) + Q.y * Math.cos(th);
+  arc2(L, 0.7, 0, th, C.spin);
+  L.text(`${(th / DEG).toFixed(0)}\u00b0`, V.polar(0.95, th / 2), { size: 11.5, color: C.spin });
+  L.note(`New coordinates: (${xq.toFixed(2)}, ${yq.toFixed(2)}).  x\u00b2 + y\u00b2 = ${(xq * xq + yq * yq).toFixed(2)} (always ${(rho * rho).toFixed(2)})`);
+
+  // Right: boosting spacetime by the same number, as a rapidity. A point keeps its interval.
+  const R = pens[1]; grid(R.begin(), 2.6);
+  const E = { x: 0.7, y: 1.5 }; // an event: x across, t up
+  const c = Math.cosh(th), sh = Math.sinh(th);
+  const s2 = E.y * E.y - E.x * E.x;
+  R.line([{ x: -2.5, y: -2.5 }, { x: 2.5, y: 2.5 }], 'rgba(255,213,79,0.5)', 1.5, [6, 5]); R.line([{ x: -2.5, y: 2.5 }, { x: 2.5, y: -2.5 }], 'rgba(255,213,79,0.5)', 1.5, [6, 5]);
+  R.line([{ x: -2.5, y: 0 }, { x: 2.5, y: 0 }], 'rgba(255,255,255,0.5)', 1.6); R.line([{ x: 0, y: -2.5 }, { x: 0, y: 2.5 }], 'rgba(255,255,255,0.5)', 1.6);
+  const hyp = []; for (let x = -2.5; x <= 2.5 + 1e-9; x += 0.05) hyp.push({ x, y: Math.sqrt(s2 + x * x) });
+  R.line(hyp, 'rgba(255,213,79,0.5)', 1.8, [5, 4]);
+  const b1 = Math.tanh(u1), bt = Math.tanh(th);
+  if (u1 > 0 && u2 > 0) { R.line([{ x: -2.6 * b1, y: -2.6 }, { x: 2.6 * b1, y: 2.6 }], 'rgba(79,195,247,0.25)', 1.4); R.line([{ x: -2.6, y: -2.6 * b1 }, { x: 2.6, y: 2.6 * b1 }], 'rgba(79,195,247,0.25)', 1.4); }
+  R.line([{ x: -2.6 * bt, y: -2.6 }, { x: 2.6 * bt, y: 2.6 }], C.ball, 2.4); R.line([{ x: -2.6, y: -2.6 * bt }, { x: 2.6, y: 2.6 * bt }], C.ball, 2.4);
+  R.text("t'", { x: 2.4 * bt, y: 2.4 }, { dx: 12, dy: -6, size: 12, color: C.ball }); R.text("x'", { x: 2.4, y: 2.4 * bt }, { dx: -4, dy: 14, size: 12, color: C.ball });
+  R.arrow({ x: 0, y: 0 }, E, '#fff', 3, ''); R.dot(E, '#fff', 7); R.text('the same event', E, { dx: 12, dy: -12, size: 11, color: '#fff' });
+  const xe = E.x * c - E.y * sh, te = -E.x * sh + E.y * c;
+  R.note(`New coordinates: (x', t') = (${xe.toFixed(2)}, ${te.toFixed(2)}).  t'\u00b2 \u2212 x'\u00b2 = ${(te * te - xe * xe).toFixed(2)} (always ${s2.toFixed(2)})`);
+
+  const b2 = Math.tanh(u2), naive = b1 + b2, comb = Math.tanh(th);
+  app.explain(`${nums([['first speed', `${b1.toFixed(3)} c`], ['second speed', `${b2.toFixed(3)} c`], ['simply added', `${naive.toFixed(3)} c`, naive >= 1 ? '(impossible)' : ''], ['by adding the rapidities', `${comb.toFixed(4)} c`]])}
+    <p><b>Left: a turn.</b> Turning the plane keeps the <b>distance</b> from the middle, x\u00b2 + y\u00b2. A point moves along a circle, and the new coordinates are x cos \u03b8 + y sin \u03b8 and \u2212x sin \u03b8 + y cos \u03b8. Two turns add their angles. <b>Right: a boost.</b> Changing to a frame that moves keeps the <b>interval</b>, t\u00b2 \u2212 x\u00b2. A point moves along a <b>hyperbola</b> instead of a circle, and the new coordinates are x cosh \u03c6 \u2212 t sinh \u03c6 and \u2212x sinh \u03c6 + t cosh \u03c6. It is the same formula with cosh and sinh in place of cos and sin. The speed is \u03b2 = tanh \u03c6, and \u03c6 is the <b>rapidity</b>, the hyperbolic angle.</p>
+    <p>That one change of letters explains the rule for adding speeds. Two turns add their angles, so two boosts add their <b>rapidities</b>, not their speeds. Since tanh never reaches 1, no number of boosts can reach the speed of light. Two boosts of 0.9 c give 0.994 c, not 1.8 c: tanh(\u03c6\u2081 + \u03c6\u2082) = (\u03b2\u2081 + \u03b2\u2082) / (1 + \u03b2\u2081\u03b2\u2082). In the language of the complex-numbers page, a boost is a turn by an imaginary angle, because cos(i\u03c6) = cosh \u03c6. The light rays (yellow, at 45\u00b0) are the lines that a boost never moves, just as a turn leaves only the middle in place.</p>`);
+}
+
 function draw(now) {
   tr.step(now);
   const m = ui.v.mode;
-  if (m === 'clock') drawClock(); else if (m === 'train') drawTrain(); else drawST();
+  if (m === 'clock') drawClock(); else if (m === 'train') drawTrain(); else if (m === 'boost') drawBoost(); else drawST();
 }
 setup(); tr.restart();
 Spin.run(draw);

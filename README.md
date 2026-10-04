@@ -54,7 +54,8 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
 **Moving observers**
 
 - `relativity`: a light clock (moving clocks run slow), a train and two lightning strikes
-  (simultaneity), and a spacetime diagram with events you can drag.
+  (simultaneity), a spacetime diagram with events you can drag, and boosts as rotations by a
+  hyperbolic angle (rapidities add, which is why speeds never reach c).
 - `observers`: rain on a moving person (run or walk), the Doppler effect of a passing siren (with
   sound and a Mach cone), and aberration of starlight at high speed.
 
@@ -72,6 +73,19 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
   frame), and a particle trapped in Earth's field (mirror points and drift).
 - `induction`: a magnet and a coil (in the frame of each), a generator, and a magnet falling through
   a copper tube.
+
+**The math of turning**
+
+- `circle`: sine and cosine as the two shadows of a point going round a circle, radians as arc length
+  (and why sin θ ≈ θ), and adding waves as adding turning arrows.
+- `complex`: multiplying as a turn and a stretch, Euler's formula (built arrow by arrow from its
+  series), Euler's identity as a half turn, and De Moivre's formula with the roots of unity.
+- `rotvec`: the speed of a turning arrow is ω × r, the cross product with the right-hand
+  rule, and the centripetal and Coriolis terms from differentiating a walk on a turntable.
+- `rot3d`: turns that do not commute, gimbal lock, Euler's rotation theorem (one axis, one angle),
+  and the quaternion going through −1 after 360° and back to +1 after 720°.
+- `spirograph`: a toothed wheel rolling inside or outside a ring. The pen is two turning arrows, and
+  the teeth decide the petals and when the curve closes.
 
 ## How it is built
 

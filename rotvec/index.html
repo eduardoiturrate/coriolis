@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rotating arrows and the cross product · Spin</title>
+<meta name="description" content="The speed of a turning arrow is omega cross r. The cross product with the right-hand rule, and where the centripetal and Coriolis terms come from when you differentiate a position in a rotating frame." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, V3, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'rotvec',
+  sub: 'Turning is described by an arrow along the axis. The speed of anything that turns follows from it.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', loop: false, speed: { min: 0.1, max: 2, value: 0.7, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['turn', 'A turning arrow'], ['cross', 'The cross product'], ['frame', 'Walking on a turntable']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('w', { label: 'Turning rate ω', min: 0.3, max: 3, step: 0.05, value: 1.2, fmt: (v) => `${v.toFixed(2)} radians a second`, show: (v) => v.mode !== 'cross' });
+ui.slider('tilt', { label: 'Tilt of the axis from upright', min: 0, max: 80, step: 1, value: 25, fmt: (v) => `${v}°`, show: is('turn') });
+ui.slider('phi', { label: 'Angle between the arrow and the axis', min: 10, max: 170, step: 1, value: 65, fmt: (v) => `${v}°`, show: is('turn') });
+ui.slider('th', { label: 'Angle between a and b', min: 0, max: 180, step: 1, value: 60, fmt: (v) => `${v}°`, show: is('cross') });
+ui.slider('lb', { label: 'Length of b', min: 0.3, max: 1.6, step: 0.05, value: 1, fmt: (v) => v.toFixed(2), show: is('cross') });
+ui.chips([{ text: 'At right angles 90°', set: { th: 90 } }, { text: 'Parallel 0°', set: { th: 0 } }, { text: 'Opposite 180°', set: { th: 180 } }], { show: is('cross') });
+ui.slider('u', { label: 'Speed of the bug along the spoke', min: 0, max: 1.5, step: 0.05, value: 0.5, fmt: (v) => v.toFixed(2), show: is('frame') });
+
+const cam = new Spin.Cam3(pens[0], { az: 0.85, el: 0.35, dist: 6.6, fov: 34, min: 2.5, max: 14 });
+ui.on((id) => { if (id === 'mode') setup(); if (id === 'mode' || id === 'u' || id === 'w') tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  cam.setActive(m !== 'frame');
+  Spin.$('transport').hidden = m === 'cross';
+  tr.setGo('Restart');
+  const caps = { turn: ['The arrow turns about the axis (drag to turn the view)', 'Speed of the tip, against the angle to the axis'], cross: ['a, b and a × b (drag to turn the view)', 'The size of a × b and of a · b, against the angle'], frame: ['In space: the bug’s velocity', 'In space: the bug’s acceleration'] }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+function basis(n) {
+  const up = Math.abs(n.z) > 0.95 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 };
+  const e1 = V3.norm(V3.cross(up, n)); return [e1, V3.cross(n, e1)];
+}
+
+// ---------- A turning arrow ----------
+
+function drawTurn() {
+  const { w, tilt, phi } = ui.v, t = tr.t;
+  const wh = { x: Math.sin(tilt * DEG), y: 0, z: Math.cos(tilt * DEG) };
+  const [e1] = basis(wh);
+  const rl = 1.5;
+  const r0 = V3.add(V3.mul(wh, Math.cos(phi * DEG)), V3.mul(e1, Math.sin(phi * DEG)));
+  const at = (s) => V3.mul(V3.turn(r0, wh, w * s), rl);
+  const r = at(t);
+  const v = V3.cross(V3.mul(wh, w), r);
+  const h = 1e-4, vnum = V3.mul(V3.sub(at(t + h), at(t - h)), 1 / (2 * h));
+  pens[0].begin(); cam.begin();
+  const ring = []; for (let s = 0; s <= TAU / w + 1e-9; s += TAU / w / 80) ring.push(at(s));
+  cam.line(ring, 'rgba(255,255,255,0.3)', 1.6, [4, 4]);
+  for (let k = 0; k < 6; k++) cam.line([{ x: 0, y: 0, z: 0 }, at((k * TAU) / (6 * w))], 'rgba(255,255,255,0.07)', 1);
+  cam.line([V3.mul(wh, -1.9), V3.mul(wh, 1.9)], 'rgba(255,255,255,0.55)', 2);
+  cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(wh, 0.5 + 0.35 * w), C.spin, 4, 'ω (the axis)');
+  // The way it turns: a small circle arrow around the axis, by the right-hand rule.
+  const [b1, b2] = basis(wh), top = V3.mul(wh, 1.35), arcP = [];
+  for (let k = 0; k <= 22; k++) { const a = 0.4 + (k / 22) * 4.6; arcP.push(V3.add(top, V3.add(V3.mul(b1, 0.3 * Math.cos(a)), V3.mul(b2, 0.3 * Math.sin(a))))); }
+  cam.line(arcP, C.spin, 2.2);
+  cam.arrow({ x: 0, y: 0, z: 0 }, r, C.ink, 4, 'r');
+  cam.arrow(r, V3.mul(v, 0.55), C.you, 3.8, 'v = ω × r');
+  cam.dot(r, C.ink, 6);
+  cam.dot({ x: 0, y: 0, z: 0 }, '#fff', 4);
+  pens[0].note('Curl the fingers of your right hand the way it turns: the thumb points along ω');
+
+  const q = pens[1].begin();
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: 180, y0: 0, y1: w * rl * 1.1, title: 'Speed of the tip |ω × r| against the angle between r and the axis', xTicks: 6, yTicks: 5, fmtY: (a) => a.toFixed(1), xTitle: 'angle between r and ω (degrees)' });
+  const pts = []; for (let a = 0; a <= 180; a += 2) pts.push({ x: a, y: w * rl * Math.sin(a * DEG) });
+  ch.line(pts, C.you, 3); ch.dot(phi, w * rl * Math.sin(phi * DEG), C.ink, 7); ch.vline(phi);
+  const sp = V3.len(v);
+  app.explain(`${nums([['speed of the tip', sp.toFixed(3)], ['ω r sin(angle)', (w * rl * Math.sin(phi * DEG)).toFixed(3)], ['measured from the motion', V3.len(vnum).toFixed(3)], ['radius of its circle', (rl * Math.sin(phi * DEG)).toFixed(2)]])}
+    <p>Turning needs two things: how fast, and about which line. One arrow carries both. The arrow ω lies along the axis, and its length is the turning rate. Which way along the axis it points is given by the <b>right-hand rule</b>: curl the fingers of your right hand the way it turns, and the thumb points along ω.</p>
+    <p>Now take an arrow r from the middle that turns with everything else. Its tip goes round a circle of radius r sin(angle), at the turning rate ω, so its speed is ω r sin(angle). The direction is along the circle: at right angles to both ω and r. That is exactly what the <b>cross product</b> gives: <b>v = ω × r</b>. The measured speed in the cards (from the actual motion of the tip) agrees. The speed is largest when r is at right angles to the axis, and zero when r lies along it, because then the tip does not move.</p>`);
+}
+
+// ---------- The cross product ----------
+
+function drawCross() {
+  const { th, lb } = ui.v;
+  const A = { x: 1.5, y: 0, z: 0 }, B = { x: lb * Math.cos(th * DEG), y: lb * Math.sin(th * DEG), z: 0 };
+  const X = V3.cross(A, B), Xs = V3.mul(X, 0.7);
+  pens[0].begin(); cam.begin();
+  for (let k = -2; k <= 2; k++) { cam.line([{ x: -2, y: k, z: 0 }, { x: 2, y: k, z: 0 }], 'rgba(255,255,255,0.05)', 1); cam.line([{ x: k, y: -2, z: 0 }, { x: k, y: 2, z: 0 }], 'rgba(255,255,255,0.05)', 1); }
+  cam.faces([{ pts: [{ x: 0, y: 0, z: 0 }, A, V3.add(A, B), B], fill: 'rgba(255,162,74,0.28)', stroke: 'rgba(255,162,74,0.8)', width: 1.5 }]);
+  cam.arrow({ x: 0, y: 0, z: 0 }, A, C.ball, 4, 'a'); cam.arrow({ x: 0, y: 0, z: 0 }, B, C.friend, 4, 'b');
+  if (V3.len(X) > 0.02) cam.arrow({ x: 0, y: 0, z: 0 }, Xs, C.you, 4.5, 'a × b');
+  const arc = []; for (let a = 0; a <= th * DEG + 1e-9; a += 0.05) arc.push({ x: 0.5 * Math.cos(a), y: 0.5 * Math.sin(a), z: 0 });
+  cam.line(arc, C.spin, 2.2);
+  cam.dot({ x: 0, y: 0, z: 0 }, '#fff', 4);
+  pens[0].note('a × b stands at right angles to the flat patch made by a and b');
+  const q = pens[1].begin();
+  const mx = 1.5 * lb * 1.1;
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: 180, y0: -mx, y1: mx, title: 'Size of a × b (green) and the dot product a · b (blue), against the angle', xTicks: 6, yTicks: 4, fmtY: (v) => v.toFixed(1), xTitle: 'angle between a and b (degrees)' });
+  const s = [], c = []; for (let a = 0; a <= 180; a += 2) { s.push({ x: a, y: 1.5 * lb * Math.sin(a * DEG) }); c.push({ x: a, y: 1.5 * lb * Math.cos(a * DEG) }); }
+  ch.hline(0, 'rgba(255,255,255,0.35)', [1, 0]);
+  ch.line(s, C.you, 3); ch.line(c, C.ball, 3);
+  ch.vline(th); ch.dot(th, 1.5 * lb * Math.sin(th * DEG), C.you, 6.5); ch.dot(th, 1.5 * lb * Math.cos(th * DEG), C.ball, 6.5);
+  app.explain(`${nums([['|a × b|', V3.len(X).toFixed(3)], ['= |a||b| sin θ', (1.5 * lb * Math.sin(th * DEG)).toFixed(3)], ['area of the patch', V3.len(X).toFixed(3)], ['a · b', V3.dot(A, B).toFixed(3)]])}
+    <p>The <b>cross product</b> a × b is an arrow with three properties. It points at <b>right angles to both a and b</b>. Its direction is given by the right-hand rule: curl the fingers from a toward b (through the smaller angle), and the thumb points along a × b. Its length is |a||b| sin θ, which is the <b>area of the patch</b> made by a and b (the orange parallelogram).</p>
+    <p>The sine is there because of the circle again: only the part of b that is at right angles to a counts, and that part is the height |b| sin θ of the point on b's circle (see Sine and cosine). The dot product uses the other part, |b| cos θ, the part along a. The two curves on the right are the two parts. When a and b are parallel the patch has no area and the cross product is zero. Swap a and b, and the arrow flips: b × a = −(a × b). Spinning is exactly this: torque is r × F and angular momentum is r × p.</p>`);
+}
+
+// ---------- Walking on a turntable ----------
+
+function drawFrame() {
+  const { w, u } = ui.v;
+  const r0 = 0.5, Tmax = (2.2 - r0) / Math.max(u, 0.05);
+  const t = Math.min(tr.t, u > 0 ? Tmax : 6);
+  if (tr.running && tr.t > (u > 0 ? Tmax : 6) + 1.2) tr.finish();
+  const rr = (s) => r0 + u * s, pos = (s) => V.polar(rr(s), w * s);
+  const r = rr(t), th = w * t;
+  const er = V.polar(1, th), et = V.polar(1, th + Math.PI / 2);
+  const p = pos(t);
+  // Velocity in space: the walk, plus the carrying: v = u r^ + w r t^.
+  const vWalk = V.mul(er, u), vCarry = V.mul(et, w * r), vTot = V.add(vWalk, vCarry);
+  // Acceleration in space: the centripetal term, and the Coriolis term 2 w u t^.
+  const aCent = V.mul(er, -w * w * r), aCor = V.mul(et, 2 * w * u), aTot = V.add(aCent, aCor);
+  const h = 1e-3, an = V.mul(V.sub(V.add(pos(t + h), pos(t - h)), V.mul(pos(t), 2)), 1 / (h * h));
+  const ext = 2.4;
+  const draw = (pen, label, vecs, scale) => {
+    pen.begin().box(-ext, ext, -ext, ext, 12);
+    pen.circle({ x: 0, y: 0 }, 2.2, { fill: 'rgba(255,255,255,0.03)', stroke: 'rgba(255,255,255,0.3)', width: 2 });
+    for (let k = 0; k < 8; k++) pen.line([{ x: 0, y: 0 }, V.polar(2.2, th + (k * TAU) / 8)], 'rgba(255,255,255,0.1)', 1.2);
+    pen.line([{ x: 0, y: 0 }, V.polar(2.2, th)], '#dfe6f0', 3.5);
+    const path = []; for (let s = 0; s <= t + 1e-9; s += Math.max(t / 120, 1e-3)) path.push(pos(s));
+    pen.line(path, 'rgba(255,162,74,0.55)', 2);
+    for (const [vec, col, txt, wd] of vecs) pen.arrow(p, V.mul(vec, scale), col, wd, txt);
+    pen.dot(p, C.ink, 7);
+    pen.note(label);
+  };
+  draw(pens[0], 'Velocity = walking along the spoke + being carried round', [[vWalk, C.ball, 'walking u', 3.2], [vCarry, C.spin, 'carried ωr', 3.2], [vTot, '#fff', 'total', 3.6]], 0.4);
+  draw(pens[1], 'Acceleration = centripetal + Coriolis term', [[aCent, C.friend, '−ω² r', 3.2], [aCor, C.you, '2 ω u', 3.2], [aTot, '#fff', 'total', 3.6]], 0.45);
+  app.explain(`${nums([['velocity, from the formula', V.len(vTot).toFixed(3)], ['acceleration, from the formula', V.len(aTot).toFixed(3)], ['acceleration, measured from the path', V.len(an).toFixed(3)], ['the Coriolis term 2ωu', (2 * w * u).toFixed(3)]])}
+    <p>A bug walks outward along a spoke of a turntable at speed u, while the turntable turns at rate ω. In space its position is r (cos ωt, sin ωt) with r growing steadily. Differentiate it. The <b>velocity</b> has two parts: u along the spoke (the walking) and ω r along the circle (being carried round, which is ω × r again). The <b>acceleration</b> has two parts as well: −ω² r toward the middle (the centripetal part, the same for anything on a circle), and 2ωu along the circle. That second part has no counterpart for a bug that is not walking.</p>
+    <p>Where does the 2 come from? The walking speed u turns with the spoke, and that gives ωu. Then the speed of being carried round, ωr, grows as r grows, and that gives another ωu. Together: 2ωu. Seen from the turntable, this term is the <b>Coriolis force</b>: the turntable has to push the bug along the circle with 2mωu for it to keep to the spoke. The numbers in the cards show that the formula and the acceleration measured from the actual path agree. Everything on the rotating-frame pages is this one calculation.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'turn') drawTurn(); else if (m === 'cross') drawCross(); else drawFrame();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Complex numbers as turns · Spin</title>
+<meta name="description" content="Multiplying by a complex number turns and stretches the plane. Euler's formula, Euler's identity, De Moivre's formula and the roots of unity are all statements about turning." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+const cm = (a, b) => ({ x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x });
+const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const cs = (z, d = 2) => `${z.x.toFixed(d)} ${z.y < 0 ? '−' : '+'} ${Math.abs(z.y).toFixed(d)}i`;
+
+const app = Spin.app({
+  slug: 'complex',
+  sub: 'A complex number is a point on a plane, or an arrow from the middle. Multiplying them is a turn, and a stretch.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Play', speed: { min: 0.2, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['times', 'Multiplying'], ['euler', 'Euler’s formula'], ['identity', 'Euler’s identity'], ['powers', 'Powers and roots']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('mag', { label: 'Stretch: the length of w', min: 0.2, max: 2.5, step: 0.05, value: 1.4, fmt: (v) => v.toFixed(2), show: is('times') });
+ui.slider('arg', { label: 'Turn: the angle of w', min: -180, max: 180, step: 5, value: 60, fmt: (v) => `${v}°`, show: is('times') });
+ui.chips([{ text: '× i', set: { mag: 1, arg: 90 } }, { text: '× −1', set: { mag: 1, arg: 180 } }, { text: '× 2', set: { mag: 2, arg: 0 } }, { text: '× (1 + i)', set: { mag: Math.SQRT2, arg: 45 } }, { text: '× −i', set: { mag: 1, arg: -90 } }], { show: is('times') });
+ui.hint('Drag the orange arrow in the left picture, or use the sliders.', { show: is('times') });
+ui.slider('th', { label: 'Angle θ', min: 0, max: 3.2, step: 0.01, value: 2, fmt: (v) => `${v.toFixed(2)} radians (${(v / DEG).toFixed(0)}°)`, show: is('euler') });
+ui.slider('nt', { label: 'Terms of the series used', min: 1, max: 16, step: 1, value: 6, fmt: (v) => String(v), show: is('euler') });
+ui.chips([{ text: 'π/2', set: { th: Math.PI / 2 } }, { text: 'π', set: { th: Math.PI } }], { show: is('euler') });
+ui.slider('turn', { label: 'How far to turn, in multiples of π', min: 0.1, max: 2, step: 0.05, value: 1, fmt: (v) => (v === 1 ? 'π: a half turn' : v === 2 ? '2π: a full turn' : v === 0.5 ? 'π/2: a quarter turn' : `${v.toFixed(2)}π`), show: is('identity') });
+ui.chips([{ text: 'Quarter turn', set: { turn: 0.5 } }, { text: 'Half turn: the identity', set: { turn: 1 } }, { text: 'Full turn', set: { turn: 2 } }], { show: is('identity') });
+ui.slider('alpha', { label: 'The angle of z', min: 5, max: 180, step: 1, value: 40, fmt: (v) => `${v}°`, show: is('powers') });
+ui.slider('size', { label: 'The length of z', min: 0.7, max: 1.3, step: 0.01, value: 1, fmt: (v) => v.toFixed(2), show: is('powers') });
+ui.slider('np', { label: 'Powers z¹, z², z³ … up to', min: 2, max: 14, step: 1, value: 8, fmt: (v) => `z${v}`, show: is('powers') });
+ui.slider('nr', { label: 'Roots of 1: how many', min: 2, max: 12, step: 1, value: 5, fmt: (v) => String(v), show: is('powers') });
+
+ui.on((id) => { if (id === 'mode') setup(); if (!['mag', 'arg', 'th', 'nt', 'alpha', 'size', 'np', 'nr'].includes(id)) tr.restart(); else if (id === 'turn') tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  const still = m === 'euler' || m === 'powers';
+  Spin.$('transport').hidden = still;
+  tr.setGo(m === 'times' ? 'Multiply' : 'Turn');
+  const caps = {
+    times: ['The shape, and the number w to multiply by', 'The shape multiplied by w'],
+    euler: ['The point e^(iθ) on the circle', 'e^(iθ) built from its series, arrow by arrow'],
+    identity: ['The point e^(iθ) turns on the unit circle', 'Adding 1 to it: the sum reaches zero at π'],
+    powers: ['Powers of z: each power turns by the same angle again', 'The roots of 1 are the corners of a regular polygon'],
+  }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+
+function plane(p, ext) {
+  p.box(-ext, ext, -ext, ext, 14);
+  for (let k = -Math.floor(ext); k <= Math.floor(ext); k++) { p.line([{ x: k, y: -ext }, { x: k, y: ext }], 'rgba(255,255,255,0.06)', 1); p.line([{ x: -ext, y: k }, { x: ext, y: k }], 'rgba(255,255,255,0.06)', 1); }
+  p.line([{ x: -ext, y: 0 }, { x: ext, y: 0 }], 'rgba(255,255,255,0.4)', 1.5); p.line([{ x: 0, y: -ext }, { x: 0, y: ext }], 'rgba(255,255,255,0.4)', 1.5);
+  p.text('real', { x: ext, y: 0 }, { dx: -22, dy: -10, size: 10.5, color: 'rgba(255,255,255,0.55)' }); p.text('imaginary', { x: 0, y: ext }, { dx: 36, dy: 10, size: 10.5, color: 'rgba(255,255,255,0.55)' });
+}
+const unitCircle = (p, col = 'rgba(255,255,255,0.4)') => p.circle({ x: 0, y: 0 }, 1, { stroke: col, width: 1.8 });
+const arc = (p, r, a0, a1, col, w = 2.5) => { const o = []; const n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / 0.05)); for (let k = 0; k <= n; k++) o.push(V.polar(r, a0 + ((a1 - a0) * k) / n)); p.line(o, col, w); };
+
+// ---------- Multiplying ----------
+
+const F0 = [[[0, 0], [0, 1], [0.6, 1]], [[0, 0.55], [0.4, 0.55]]].map((pl) => pl.map(([x, y]) => ({ x: x * 0.8 + 0.9, y: y * 0.8 + 0.2 })));
+const BASE = F0[0][0];
+function drawTimes() {
+  const { mag, arg } = ui.v, w = V.polar(mag, arg * DEG);
+  const prog = tr.running || tr.endedAt ? ease(Math.min(1, tr.t / 2.8)) : 1;
+  if (tr.running && tr.t > 4.5) tr.finish();
+  const ext = Math.max(3.2, mag * 1.7 + 0.8);
+  const wp = V.polar(Math.pow(mag, prog), arg * DEG * prog);
+  const L = pens[0]; plane(L.begin(), ext);
+  F0.forEach((pl) => L.line(pl, 'rgba(79,195,247,0.9)', 3.5));
+  L.arrow({ x: 0, y: 0 }, BASE, '#fff', 2.5, '');
+  L.dot(BASE, '#fff', 4);
+  arc(L, 0.5, 0, Math.atan2(BASE.y, BASE.x), 'rgba(255,255,255,0.5)', 1.8);
+  L.arrow({ x: 0, y: 0 }, w, C.ink, 4, 'w');
+  arc(L, 0.9, 0, arg * DEG, C.spin, 2.5);
+  L.text(`${arg}°`, V.polar(1.15, (arg * DEG) / 2), { size: 11.5, color: C.spin });
+  L.note('The shape (blue) and the number w to multiply it by (orange)');
+  const R = pens[1]; plane(R.begin(), ext);
+  F0.forEach((pl) => R.line(pl, 'rgba(79,195,247,0.25)', 2));
+  const trail = []; for (let q = 0; q <= prog + 1e-9; q += 0.02) trail.push(cm(BASE, V.polar(Math.pow(mag, q), arg * DEG * q)));
+  R.line(trail, 'rgba(255,255,255,0.35)', 1.6, [3, 4]);
+  F0.forEach((pl) => R.line(pl.map((q) => cm(q, wp)), C.ink, 4));
+  const pb = cm(BASE, wp);
+  R.arrow({ x: 0, y: 0 }, pb, '#fff', 2.5, ''); R.dot(pb, '#fff', 4);
+  arc(R, 0.5, 0, Math.atan2(pb.y, pb.x), 'rgba(255,255,255,0.5)', 1.8);
+  R.note(prog < 1 ? 'The whole plane turns and stretches' : 'Every point turned by the angle of w and stretched by its length');
+  const a0 = Math.atan2(BASE.y, BASE.x) / DEG, l0 = V.len(BASE);
+  app.explain(`${nums([['w', `${mag.toFixed(2)} at ${arg}°`], ['the white arrow turns from', `${a0.toFixed(0)}° to ${(a0 + arg).toFixed(0)}°`], ['its length goes from', `${l0.toFixed(2)} to ${(l0 * mag).toFixed(2)}`]])}
+    <p>A complex number a + bi is the point (a, b), or the arrow from the middle to it. It has a <b>length</b> and an <b>angle</b>. To multiply two of them, <b>multiply the lengths and add the angles</b>. So multiplying by w does the same thing to every point on the plane: it turns it by the angle of w and stretches it by the length of w. The whole blue shape is turned and stretched together, and keeps its shape (the F is not bent or mirrored).</p>
+    <p>Try the chips. Multiplying by <b>i</b> (length 1, angle 90°) is a quarter turn, which is why i × i = −1: two quarter turns make a half turn, and a half turn takes 1 to −1. Multiplying by −i turns the other way. A real number, like 2, only stretches. This is why complex numbers are the natural numbers for turning, and why the sum of two turns is a product.</p>`);
+}
+pens[0].pointer({
+  down(w) { ui.set('mag', Math.max(0.2, Math.min(2.5, Math.round(V.len(w) * 20) / 20)), true); ui.set('arg', Math.round(Math.atan2(w.y, w.x) / DEG / 5) * 5); },
+  move(w) { ui.set('mag', Math.max(0.2, Math.min(2.5, Math.round(V.len(w) * 20) / 20)), true); ui.set('arg', Math.round(Math.atan2(w.y, w.x) / DEG / 5) * 5, true); },
+});
+
+// ---------- Euler's formula ----------
+
+function drawEuler() {
+  const th = ui.v.th, nt = ui.v.nt;
+  const E = V.polar(1, th);
+  const L = pens[0]; plane(L.begin(), 1.6);
+  unitCircle(L);
+  arc(L, 0.3, 0, th, C.spin, 2.5); L.text('θ', V.polar(0.46, th / 2), { size: 12, color: C.spin });
+  L.line([{ x: 0, y: 0 }, E], '#fff', 3);
+  L.line([{ x: 0, y: 0 }, { x: E.x, y: 0 }], C.ball, 4.5); L.line([{ x: E.x, y: 0 }, E], C.ink, 4.5);
+  L.dot(E, '#fff', 7); L.text(`e^(iθ)`, E, { dx: 20, dy: -14, size: 12.5, color: '#fff' });
+  L.text('cos θ', { x: E.x / 2, y: 0 }, { dy: 15, size: 11, color: C.ball }); L.text('sin θ', { x: E.x, y: E.y / 2 }, { dx: 24, size: 11, color: C.ink });
+  L.note(`e^(iθ) = cos θ + i sin θ = ${cs(E)}`);
+  // The series: 1, iθ, (iθ)^2/2, ... laid head to tail.
+  const terms = []; let t = { x: 1, y: 0 }; terms.push(t);
+  for (let n = 1; n < nt; n++) { t = cm(t, { x: 0, y: th / n }); terms.push(t); }
+  const pos = [{ x: 0, y: 0 }]; terms.forEach((q) => pos.push(V.add(pos[pos.length - 1], q)));
+  const ext = Math.max(1.6, ...pos.map((q) => Math.max(Math.abs(q.x), Math.abs(q.y))) ) * 1.15;
+  const R = pens[1]; plane(R.begin(), ext);
+  unitCircle(R, 'rgba(255,255,255,0.3)');
+  R.dot(E, 'rgba(255,255,255,0.0)', 1); R.circle(E, ext * 0.03, { stroke: '#fff', width: 2 });
+  const cols = [C.ball, C.ink, C.you, C.friend];
+  terms.forEach((q, k) => R.arrow(pos[k], q, cols[k % 4], k < 4 ? 3.2 : 2.2, k < 4 ? ['1', 'iθ', '−θ²/2', '−iθ³/6'][k] : ''));
+  const sum = pos[pos.length - 1];
+  R.dot(sum, C.spin, 6);
+  R.note('Arrows head to tail: 1, iθ, (iθ)²/2 … The chain ends on the circle');
+  const err = V.len(V.sub(sum, E));
+  app.explain(`${nums([['cos θ', E.x.toFixed(4)], ['sin θ', E.y.toFixed(4)], [`series with ${nt} terms`, cs(sum, 4)], ['the miss', err < 1e-4 ? '< 0.0001' : err.toFixed(4)]])}
+    <p><b>Euler's formula</b> is e^(iθ) = cos θ + i sin θ. The left picture is the meaning: e^(iθ) is the point on the unit circle at angle θ. The right picture is the reason. The number e^x can be written as a sum: 1 + x + x²/2 + x³/6 + …. Put x = iθ, and each term is an arrow. The powers of i turn the arrows: the first goes right, the second up, the third left, the fourth down, and so on. The sizes shrink fast, so the chain of arrows curls in and ends on the circle.</p>
+    <p>The real part of the sum is 1 − θ²/2 + θ⁴/24 − …, which is the series of the cosine. The imaginary part is θ − θ³/6 + …, the series of the sine. So the formula says the sine and the cosine are the two coordinates of one turning point. Use more terms to see the end of the chain land on the white circle. A bigger angle needs more terms.</p>`);
+}
+
+// ---------- Euler's identity ----------
+
+function drawIdentity() {
+  const turn = ui.v.turn;
+  const s = tr.running || tr.endedAt ? ease(Math.min(1, tr.t / 4)) : 1;
+  if (tr.running && tr.t > 6) tr.finish();
+  const th = turn * Math.PI * s, E = V.polar(1, th);
+  const L = pens[0]; plane(L.begin(), 1.6);
+  unitCircle(L);
+  L.line([{ x: -1.5, y: 0 }, { x: 1.5, y: 0 }], 'rgba(255,255,255,0.0)', 1);
+  arc(L, 0.5, 0, th, C.spin, 3);
+  L.dot({ x: 1, y: 0 }, C.you, 5); L.text('1', { x: 1, y: 0 }, { dx: 14, dy: 12, size: 12, color: C.you });
+  L.dot({ x: -1, y: 0 }, 'rgba(155,231,166,0.55)', 5); L.text('−1', { x: -1, y: 0 }, { dx: -16, dy: 12, size: 12, color: C.you });
+  L.line([{ x: 0, y: 0 }, E], '#fff', 3.5);
+  L.dot(E, '#fff', 7);
+  L.text(`${(th / DEG).toFixed(0)}°`, V.polar(0.68, th / 2), { size: 11.5, color: C.spin });
+  const val = `e^(i·${(th / Math.PI).toFixed(2)}π) = ${cs({ x: Math.abs(E.x) < 1e-9 ? 0 : E.x, y: Math.abs(E.y) < 1e-9 ? 0 : E.y })}`;
+  L.note(val);
+  const R = pens[1]; plane(R.begin(), 2.4);
+  const tr1 = []; for (let q = 0; q <= th + 1e-9; q += 0.03) tr1.push(V.add(V.polar(1, q), { x: 1, y: 0 }));
+  R.circle({ x: 1, y: 0 }, 1, { stroke: 'rgba(255,255,255,0.18)', width: 1.4, dash: [3, 4] });
+  R.line(tr1, 'rgba(255,255,255,0.45)', 2);
+  R.arrow({ x: 0, y: 0 }, E, '#fff', 3.5, '');
+  R.arrow(E, { x: 1, y: 0 }, C.you, 3.5, '+ 1');
+  const sum = V.add(E, { x: 1, y: 0 });
+  R.arrow({ x: 0, y: 0 }, sum, C.ink, 2.2, '');
+  R.dot(sum, C.ink, 6.5);
+  const zero = V.len(sum) < 0.03;
+  if (zero) R.circle({ x: 0, y: 0 }, 0.14, { stroke: C.ink, width: 3 });
+  R.note(zero ? 'e^(iπ) + 1 = 0: the arrows cancel' : `e^(iθ) + 1 = ${cs({ x: sum.x, y: sum.y })}`);
+  app.explain(`${nums([['e^(iθ)', `${cs({ x: Math.abs(E.x) < 1e-9 ? 0 : E.x, y: Math.abs(E.y) < 1e-9 ? 0 : E.y })}`], ['angle', `${(th / Math.PI).toFixed(2)}π`, `(${(th / DEG).toFixed(0)}°)`], ['e^(iθ) + 1', `${V.len(sum) < 0.001 ? '0' : V.len(sum).toFixed(3)}`, 'long']])}
+    <p><b>Euler's identity</b>, e^(iπ) + 1 = 0, looks like magic, but it is a picture. e^(iθ) is the point on the unit circle at angle θ. Turn by π, which is half a turn, and the point starts at 1 and ends at the opposite side, which is −1. So e^(iπ) = −1. Move the 1 to the other side and you get e^(iπ) + 1 = 0.</p>
+    <p>The right picture shows it as arrows: the arrow e^(iθ), then an arrow of length 1 added to it. The tip of the sum goes round a circle of radius 1 around the point 1, and it passes through zero exactly when θ = π. The same picture gives the others: a quarter turn gives e^(iπ/2) = i, and a full turn gives e^(2πi) = 1. What is surprising is only that π, e, i, 1 and 0 meet in one sentence. The reason is that e^(iθ) is a turn, and π is half of one.</p>`);
+}
+
+// ---------- Powers and roots ----------
+
+function drawPowers() {
+  const { alpha, size, np, nr } = ui.v, a = alpha * DEG;
+  const z = V.polar(size, a);
+  let ext = 1.5; for (let k = 1; k <= np; k++) ext = Math.max(ext, Math.pow(size, k) * 1.15);
+  const L = pens[0]; plane(L.begin(), ext);
+  unitCircle(L);
+  let p = { x: 1, y: 0 };
+  L.dot({ x: 1, y: 0 }, C.you, 5);
+  const pts = [{ x: 1, y: 0 }];
+  for (let k = 1; k <= np; k++) {
+    p = cm(p, z); pts.push(p);
+    const col = k === 1 ? C.ink : 'rgba(255,255,255,0.8)';
+    L.line([pts[k - 1], p], 'rgba(255,255,255,0.3)', 1.2, [3, 4]);
+    L.line([{ x: 0, y: 0 }, p], k === 1 ? C.ink : 'rgba(255,255,255,0.12)', k === 1 ? 2.5 : 1);
+    L.dot(p, k === 1 ? C.ink : C.ball, 5.5);
+    L.text(`z${k > 1 ? k : ''}`, p, { dx: 12, dy: -10, size: 11, color: col });
+  }
+  arc(L, 0.35, 0, a, C.spin, 2.5);
+  L.note(`Each power turns by another ${alpha}°${size !== 1 ? ' and stretches by the same factor' : ''}`);
+  const nth = np;
+  const zn = pts[np], cosn = Math.cos(np * a);
+  const n = nr, R = pens[1]; plane(R.begin(), 1.6);
+  unitCircle(R);
+  const roots = []; for (let k = 0; k < n; k++) roots.push(V.polar(1, (k * TAU) / n));
+  R.poly(roots, { fill: 'rgba(79,195,247,0.1)', stroke: 'rgba(79,195,247,0.7)', width: 2 });
+  roots.forEach((q, k) => { R.line([{ x: 0, y: 0 }, q], 'rgba(255,255,255,0.12)', 1); R.dot(q, k === 0 ? C.you : k === 1 ? C.ink : C.ball, k < 2 ? 6.5 : 5.5); });
+  R.text('1', roots[0], { dx: 14, dy: 12, size: 11.5, color: C.you }); if (n > 2) R.text('ω', roots[1], { dx: 12, dy: -10, size: 12.5, color: C.ink });
+  arc(R, 0.3, 0, TAU / n, C.spin, 2.5); R.text(`${(360 / n).toFixed(0)}°`, V.polar(0.5, Math.PI / n), { size: 11, color: C.spin });
+  R.note(`The ${n} roots of 1: multiply by ω and you step to the next corner`);
+  app.explain(`${nums([[`z${nth} (from the picture)`, cs(zn)], [`cos(${nth} × ${alpha}°)`, cosn.toFixed(3)], ['corners of the polygon', String(n)], ['their sum', '0']])}
+    <p><b>Powers.</b> Multiplying by z turns by its angle and stretches by its length, so z² turns by twice the angle, z³ by three times, and so on. With length 1 the powers go round the circle in equal steps. This is <b>De Moivre's formula</b>: (cos α + i sin α)ⁿ = cos nα + i sin nα. It is the rule that n turns of α is one turn of nα. The cards show that cos(${nth} × ${alpha}°) is the real part of z${nth} when the length is 1. With a length other than 1, the powers spiral out or in.</p>
+    <p><b>Roots of 1.</b> The numbers that give 1 when raised to the n-th power are the n corners of a regular polygon: take the angle 360°/n and keep multiplying by it. Each step is the same turn, so after n steps you are back at 1. The corners add up to zero, because the polygon is balanced: for every arrow there is an arrow that cancels part of it. These roots are the same circles that Fourier circles turn on.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'times') drawTimes(); else if (m === 'euler') drawEuler(); else if (m === 'identity') drawIdentity(); else drawPowers();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

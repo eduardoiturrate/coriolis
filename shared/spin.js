@@ -126,7 +126,7 @@
 
   // ---------- The list of explainers ----------
 
-  const GROUPS = ['Rotating frames', 'Rotating bodies', 'Orbits and gravity', 'Moving observers', 'Waves and oscillation', 'Fields and charges'];
+  const GROUPS = ['Rotating frames', 'Rotating bodies', 'Orbits and gravity', 'Moving observers', 'Waves and oscillation', 'Fields and charges', 'The math of turning'];
   const TOPICS = [
     { slug: 'coriolis', group: 0, title: 'Coriolis effect', blurb: 'A thrown ball flies straight, but the ground under it turns. A roundabout, a space station, cannon shells, storms, trade winds and a pendulum.' },
     { slug: 'centrifugal', group: 0, title: 'Centrifugal force', blurb: 'A ball on a string, water in a spinning bucket, and a ride that pins you to the wall. Is the outward force real?' },
@@ -142,7 +142,7 @@
     { slug: 'slingshot', group: 2, title: 'Gravity assist', blurb: 'A probe gains speed from a planet. Seen from the planet, it gains nothing.' },
     { slug: 'inclination', group: 2, title: 'Launch heading and orbit tilt', blurb: 'How the heading of a launch and the latitude of the site decide the tilt of the orbit.' },
     { slug: 'tides', group: 2, title: 'Tides and tidal locking', blurb: 'Why there are two tides a day, and why the Moon always shows the same face.' },
-    { slug: 'relativity', group: 3, title: 'Special relativity', blurb: 'A light clock, a train and two lightning strikes, and a spacetime diagram you can change.' },
+    { slug: 'relativity', group: 3, title: 'Special relativity', blurb: 'A light clock, a train and two lightning strikes, a spacetime diagram you can change, and boosts as rotations by a hyperbolic angle.' },
     { slug: 'observers', group: 3, title: 'Moving observers', blurb: 'Rain on a moving car, the Doppler effect, and the way stars crowd ahead at high speed.' },
     { slug: 'resonance', group: 4, title: 'Resonance', blurb: 'Push a swing at the right rhythm and it grows. A driven oscillator and its response.' },
     { slug: 'coupled', group: 4, title: 'Coupled oscillators', blurb: 'Two pendulums joined by a spring pass energy back and forth. A chain of masses has its own modes.' },
@@ -150,6 +150,11 @@
     { slug: 'fourier', group: 4, title: 'Fourier circles', blurb: 'Circles on circles that add up to a wave, or to a picture you draw.' },
     { slug: 'charged', group: 5, title: 'Charged particles', blurb: 'A charge in a magnetic field turns in a circle. Add an electric field and it drifts. Earth’s field traps it.' },
     { slug: 'induction', group: 5, title: 'Induction', blurb: 'A magnet through a coil, a coil turning in a field, and a magnet falling through a tube.' },
+    { slug: 'circle', group: 6, title: 'Sine and cosine', blurb: 'A point goes round a circle, and its shadows are the sine and the cosine. Radians, and why two waves of one speed add up to a wave.' },
+    { slug: 'complex', group: 6, title: 'Complex numbers as turns', blurb: 'Multiplying by a complex number turns and stretches. Euler’s formula, Euler’s identity, powers and roots, all as turns.' },
+    { slug: 'rotvec', group: 6, title: 'Rotating arrows and the cross product', blurb: 'The speed of a turning arrow is ω × r. The cross product, and where the Coriolis term comes from.' },
+    { slug: 'rot3d', group: 6, title: '3D rotations', blurb: 'Turns in 3D do not commute. Gimbal lock, one axis for any rotation, and why 720° brings you back.' },
+    { slug: 'spirograph', group: 6, title: 'Spirograph', blurb: 'A circle rolling inside or around another circle draws a rosette. The numbers of teeth decide how it closes.' },
   ];
 
   // Small pictures for the home page and the menu. Each fits a 64 by 64 box.
@@ -160,6 +165,11 @@
     centrifugal: ic(`<circle cx="30" cy="32" r="15" stroke="${W}" stroke-dasharray="3 5"/><circle cx="45" cy="32" r="5" fill="${A}" stroke="none"/><path d="M30 32h13" stroke="${G}"/><path d="M51 32h9M56 28l4 4-4 4" stroke="${B}"/>`),
     jump: ic(`<path d="M4 58Q32 36 60 58" stroke="${G}"/><path d="M30 44V30" stroke="${W}"/><circle cx="30" cy="26" r="4" stroke="${W}"/><path d="M30 24C34 6 54 6 52 38" stroke="${B}" stroke-dasharray="2 5"/><path d="M47 33l5 6 5-6" stroke="${B}"/>`),
     hub: ic(`<circle cx="32" cy="32" r="24" stroke="${W}"/><path d="M32 32V8M32 32l21 12M32 32L11 44" stroke="${W}" stroke-dasharray="1 0"/><circle cx="32" cy="32" r="3.5" fill="${A}" stroke="none"/><path d="M32 32C38 28 44 34 50 26" stroke="${B}"/><path d="M46 24l5 2-2 5" stroke="${B}"/>`),
+    circle: ic(`<circle cx="22" cy="32" r="15" stroke="${W}"/><path d="M22 32L33 22" stroke="${B}"/><path d="M33 22V32" stroke="${A}" stroke-dasharray="2 3"/><path d="M38 32c3-14 7-14 10 0s7 14 10 0" stroke="${A}"/>`),
+    complex: ic(`<path d="M6 46H58M24 8V58" stroke="${W}" stroke-width="2"/><path d="M24 46L50 22" stroke="${B}"/><path d="M42 21h8v8" stroke="${B}"/><path d="M36 46a12 12 0 0 0-3-8" stroke="${Y}"/>`),
+    rotvec: ic(`<ellipse cx="32" cy="38" rx="22" ry="9" stroke="${A}"/><path d="M32 56V8M25 15l7-7 7 7" stroke="${W}"/><path d="M54 38l-5-8M54 38l-9 1" stroke="${B}"/>`),
+    rot3d: ic(`<path d="M14 22l18-9 18 9v20l-18 9-18-9z" stroke="${A}"/><path d="M14 22l18 9 18-9M32 31v20" stroke="${A}"/><path d="M52 12a22 22 0 0 1 4 12M52 12h-8" stroke="${B}"/>`),
+    spirograph: ic(`<ellipse cx="32" cy="32" rx="24" ry="9" stroke="${B}"/><ellipse cx="32" cy="32" rx="24" ry="9" transform="rotate(60 32 32)" stroke="${A}"/><ellipse cx="32" cy="32" rx="24" ry="9" transform="rotate(120 32 32)" stroke="${G}"/>`),
     lagrange: ic(`<circle cx="22" cy="34" r="11" stroke="${Y}"/><circle cx="48" cy="34" r="4" stroke="${A}"/><circle cx="35" cy="14" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="54" r="2.5" fill="${B}" stroke="none"/><circle cx="35" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="58" cy="34" r="2.5" fill="${B}" stroke="none"/><circle cx="4" cy="34" r="2.5" fill="${B}" stroke="none"/>`),
     gyroscope: ic(`<ellipse cx="38" cy="26" rx="16" ry="8" transform="rotate(-20 38 26)" stroke="${A}"/><path d="M8 54l22-22" stroke="${W}"/><path d="M12 12c6-4 14-4 20 0" stroke="${B}"/><path d="M28 8l4 4-5 3" stroke="${B}"/>`),
     momentum: ic(`<circle cx="32" cy="32" r="5" fill="${W}" stroke="none"/><path d="M32 32L12 22M32 32L52 42" stroke="${W}"/><circle cx="12" cy="22" r="4" fill="${A}" stroke="none"/><circle cx="52" cy="42" r="4" fill="${A}" stroke="none"/><path d="M52 14a24 24 0 0 0-20-6" stroke="${B}"/><path d="M52 6v8h-8" stroke="${B}"/>`),

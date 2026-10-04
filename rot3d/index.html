@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>3D rotations · Spin</title>
+<meta name="description" content="Turns in 3D do not commute. Gimbal lock loses a direction. Every rotation is one turn about one axis. And a turn of 360 degrees is not the same as no turn, for the quaternion." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V3, fmt, nums, TAU, DEG } = Spin;
+
+// ---------- Rotations as 3 by 3 matrices (rows, in a flat list) ----------
+const mul = (A, B) => { const o = new Array(9); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) o[i * 3 + j] = A[i * 3] * B[j] + A[i * 3 + 1] * B[3 + j] + A[i * 3 + 2] * B[6 + j]; return o; };
+const apply = (M, v) => ({ x: M[0] * v.x + M[1] * v.y + M[2] * v.z, y: M[3] * v.x + M[4] * v.y + M[5] * v.z, z: M[6] * v.x + M[7] * v.y + M[8] * v.z });
+const tp = (M) => [M[0], M[3], M[6], M[1], M[4], M[7], M[2], M[5], M[8]];
+const I3 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+const Rx = (a) => { const c = Math.cos(a), s = Math.sin(a); return [1, 0, 0, 0, c, -s, 0, s, c]; };
+const Ry = (a) => { const c = Math.cos(a), s = Math.sin(a); return [c, 0, s, 0, 1, 0, -s, 0, c]; };
+const Rz = (a) => { const c = Math.cos(a), s = Math.sin(a); return [c, -s, 0, s, c, 0, 0, 0, 1]; };
+const Raxis = (n, a) => { const x = V3.turn({ x: 1, y: 0, z: 0 }, n, a), y = V3.turn({ x: 0, y: 1, z: 0 }, n, a), z = V3.turn({ x: 0, y: 0, z: 1 }, n, a); return [x.x, y.x, z.x, x.y, y.y, z.y, x.z, y.z, z.z]; };
+const angleOf = (M) => Math.acos(Math.max(-1, Math.min(1, (M[0] + M[4] + M[8] - 1) / 2)));
+function axisAngle(M) {
+  const ang = angleOf(M);
+  if (ang < 1e-6) return { n: { x: 0, y: 0, z: 1 }, ang: 0 };
+  if (Math.PI - ang < 1e-4) { const d = [M[0], M[4], M[8]].map((v) => Math.max(0, (v + 1) / 2)); const n = V3.norm({ x: Math.sqrt(d[0]), y: Math.sqrt(d[1]) * Math.sign(M[1] + 1e-12), z: Math.sqrt(d[2]) * Math.sign(M[2] + 1e-12) }); return { n, ang }; }
+  const n = V3.norm({ x: M[7] - M[5], y: M[2] - M[6], z: M[3] - M[1] });
+  return { n, ang };
+}
+const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+
+const app = Spin.app({
+  slug: 'rot3d',
+  sub: 'In a plane, turns add up in any order. In 3D they do not, and that changes everything about how we describe them.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Turn', speed: { min: 0.1, max: 2, value: 0.7, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['order', 'Order matters'], ['gimbal', 'Gimbal lock'], ['one', 'One axis, one angle'], ['double', 'A turn of 720°']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('a1', { label: 'First turn, about the x axis (red)', min: 0, max: 180, step: 5, value: 90, fmt: (v) => `${v}°`, show: (v) => v.mode === 'order' });
+ui.slider('b1', { label: 'Second turn, about the y axis (green)', min: 0, max: 180, step: 5, value: 90, fmt: (v) => `${v}°`, show: (v) => v.mode === 'order' });
+ui.chips([{ text: 'Both 90°', set: { a1: 90, b1: 90 } }, { text: 'Small turns 15°', set: { a1: 15, b1: 15 } }, { text: 'Both 180°', set: { a1: 180, b1: 180 } }], { show: is('order') });
+ui.slider('yaw', { label: 'Yaw: turn about the vertical axis', min: -180, max: 180, step: 1, value: 40, fmt: (v) => `${v}°`, show: is('gimbal') });
+ui.slider('pitch', { label: 'Pitch: nose up and down', min: -90, max: 90, step: 1, value: 30, fmt: (v) => `${v}°`, show: is('gimbal') });
+ui.slider('roll', { label: 'Roll: turn about the nose', min: -180, max: 180, step: 1, value: 20, fmt: (v) => `${v}°`, show: is('gimbal') });
+ui.slider('dl', { label: 'Size of the test turn', min: 10, max: 60, step: 5, value: 30, fmt: (v) => `${v}°`, show: is('gimbal') });
+ui.chips([{ text: 'Nose straight up: lock', set: { pitch: 90 } }, { text: 'Level', set: { pitch: 0 } }, { text: 'Almost up 80°', set: { pitch: 80 } }], { show: is('gimbal') });
+ui.slider('t1', { label: 'Turn 1, about x', min: -180, max: 180, step: 5, value: 70, fmt: (v) => `${v}°`, show: is('one') });
+ui.slider('t2', { label: 'Turn 2, about y', min: -180, max: 180, step: 5, value: 50, fmt: (v) => `${v}°`, show: is('one') });
+ui.slider('t3', { label: 'Turn 3, about z', min: -180, max: 180, step: 5, value: 100, fmt: (v) => `${v}°`, show: is('one') });
+ui.slider('az', { label: 'Direction of the axis, around', min: 0, max: 360, step: 5, value: 40, fmt: (v) => `${v}°`, show: is('double') });
+ui.slider('el', { label: 'Direction of the axis, up', min: 0, max: 90, step: 5, value: 55, fmt: (v) => `${v}°`, show: is('double') });
+ui.slider('tot', { label: 'Turn about the axis', min: 0, max: 720, step: 5, value: 360, fmt: (v) => `${v}°`, show: is('double') });
+ui.chips([{ text: '360°', set: { tot: 360 } }, { text: '720°', set: { tot: 720 } }], { show: is('double') });
+
+const camL = new Spin.Cam3(pens[0], { az: 0.85, el: 0.4, dist: 7.2, fov: 34, min: 4, max: 14 });
+const camR = new Spin.Cam3(pens[1], { az: 0.85, el: 0.4, dist: 7.2, fov: 34, min: 4, max: 14 });
+ui.on((id) => { if (id === 'mode') setup(); if (!['yaw', 'pitch', 'roll', 'dl'].includes(id)) tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  Spin.$('transport').hidden = m === 'gimbal';
+  tr.setGo(m === 'double' ? 'Turn' : 'Turn');
+  camL.setActive(true); camR.setActive(m !== 'double');
+  const caps = {
+    order: ['Turn about x first, then about y (drag to turn the view)', 'Turn about y first, then about x'],
+    gimbal: ['Three rings, as in a gyroscope mount', 'Two test turns: yaw (orange) and roll (blue)'],
+    one: ['Three turns, one after the other', 'One turn about one axis: the same result'],
+    double: ['A body turned about an axis (drag to turn the view)', 'The quaternion, against the turn'],
+  }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+
+// ---------- The body: a flat block, with a nose ----------
+const HX = 1.05, HY = 0.62, HZ = 0.24;
+const CORN = []; for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) CORN.push({ x: sx * HX, y: sy * HY, z: sz * HZ });
+const FACES = [
+  { ax: 'x', s: 1, col: '255,110,110' }, { ax: 'x', s: -1, col: '150,60,60' }, { ax: 'y', s: 1, col: '110,225,140' },
+  { ax: 'y', s: -1, col: '60,130,80' }, { ax: 'z', s: 1, col: '110,170,255' }, { ax: 'z', s: -1, col: '60,90,150' },
+];
+function body(cam, M, o = {}) {
+  const half = { x: HX, y: HY, z: HZ };
+  const faces = FACES.map((f) => {
+    const u = f.ax === 'x' ? ['y', 'z'] : f.ax === 'y' ? ['z', 'x'] : ['x', 'y'];
+    const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => { const p = { x: 0, y: 0, z: 0 }; p[f.ax] = f.s * half[f.ax]; p[u[0]] = a * half[u[0]]; p[u[1]] = b * half[u[1]]; return apply(M, p); });
+    return { pts, fill: `rgba(${f.col},${o.alpha ?? 0.5})`, stroke: `rgba(${f.col},0.95)`, width: 1.4 };
+  });
+  cam.faces(faces);
+  cam.arrow({ x: 0, y: 0, z: 0 }, apply(M, { x: 1.7, y: 0, z: 0 }), o.nose ?? '#fff', 3, o.label ?? 'nose');
+}
+function worldAxes(cam, len = 1.9) {
+  cam.line([{ x: -len, y: 0, z: 0 }, { x: len, y: 0, z: 0 }], 'rgba(255,110,110,0.35)', 1.2, [4, 4]);
+  cam.line([{ x: 0, y: -len, z: 0 }, { x: 0, y: len, z: 0 }], 'rgba(110,225,140,0.35)', 1.2, [4, 4]);
+  cam.line([{ x: 0, y: 0, z: -len }, { x: 0, y: 0, z: len }], 'rgba(110,170,255,0.35)', 1.2, [4, 4]);
+}
+
+// ---------- Order matters ----------
+function drawOrder() {
+  const a = ui.v.a1 * DEG, b = ui.v.b1 * DEG, t = tr.running || tr.endedAt ? tr.t : 4.2;
+  if (tr.running && t > 5.6) tr.finish();
+  const p1 = ease(t / 1.8), p2 = ease((t - 2.1) / 1.8);
+  const ML = mul(Ry(b * p2), Rx(a * p1));          // x first, then y (both about the fixed axes)
+  const MR = mul(Rx(a * p2), Ry(b * p1));          // y first, then x
+  pens[0].begin(); camL.begin(); worldAxes(camL); body(camL, ML);
+  pens[1].begin(); camR.begin(); worldAxes(camR); body(camR, MR);
+  pens[0].note(t < 2 ? 'Step 1: turn about x' : 'Step 2: turn about y');
+  pens[1].note(t < 2 ? 'Step 1: turn about y' : 'Step 2: turn about x');
+  const FL = mul(Ry(b), Rx(a)), FR = mul(Rx(a), Ry(b));
+  const apart = angleOf(mul(tp(FL), FR)) / DEG;
+  app.explain(`${nums([['the two end results are', apart < 0.5 ? 'the same' : `${apart.toFixed(0)}° apart`], ['turn about x', `${ui.v.a1}°`], ['turn about y', `${ui.v.b1}°`]])}
+    <p>Both blocks start the same way, and get the same two turns: one about the red axis (x) and one about the green axis (y), by the same angles. The only difference is the <b>order</b>. They end up pointing in different directions (see the nose). In a plane, turning by 30° and then by 50° is the same as 50° then 30°: angles just add. In 3D, turns do not commute.</p>
+    <p>Try the chips. For <b>small</b> turns, the two results are nearly the same, but not quite: the difference is a small turn about the third axis, about the product of the two angles. For two turns of 180° they <b>do</b> commute (both give a half turn about z). This is why you cannot describe a rotation in 3D with three angles added together the way you can in a plane, and why a plane's turn is a number while a 3D turn is not.</p>`);
+}
+
+// ---------- Gimbal lock ----------
+function ring(cam, n, r, col, w = 2.2) {
+  const [e1, e2] = (() => { const up = Math.abs(n.z) > 0.95 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 }; const a = V3.norm(V3.cross(up, n)); return [a, V3.cross(n, a)]; })();
+  const o = []; for (let k = 0; k <= 60; k++) { const q = (k / 60) * TAU; o.push(V3.add(V3.mul(e1, r * Math.cos(q)), V3.mul(e2, r * Math.sin(q)))); }
+  cam.line(o, col, w);
+}
+function drawGimbal() {
+  const { yaw, pitch, roll, dl } = ui.v;
+  const ps = yaw * DEG, th = -pitch * DEG, ph = roll * DEG; // a positive pitch lifts the nose, which is a turn about y the other way
+  const Rt = mul(mul(Rz(ps), Ry(th)), Rx(ph));
+  const R1 = Rz(ps), R2 = mul(R1, Ry(th));
+  const zax = { x: 0, y: 0, z: 1 }, yax = apply(R1, { x: 0, y: 1, z: 0 }), xax = apply(R2, { x: 1, y: 0, z: 0 });
+  pens[0].begin(); camL.begin();
+  ring(camL, zax, 2.15, 'rgba(110,170,255,0.8)', 2.6);
+  ring(camL, yax, 1.8, 'rgba(110,225,140,0.8)', 2.6);
+  ring(camL, xax, 1.45, 'rgba(255,110,110,0.8)', 2.6);
+  camL.line([V3.mul(zax, -2.3), V3.mul(zax, 2.3)], '#6eaaff', 2); camL.text('yaw axis', V3.mul(zax, 2.4), { size: 10.5, color: '#6eaaff', dy: -8 });
+  camL.line([V3.mul(yax, -1.95), V3.mul(yax, 1.95)], '#82e696', 2); camL.text('pitch axis', V3.mul(yax, 2.0), { size: 10.5, color: '#82e696', dy: -8 });
+  camL.line([V3.mul(xax, -1.6), V3.mul(xax, 1.6)], '#ff7878', 2); camL.text('roll axis (the nose)', V3.mul(xax, 1.7), { size: 10.5, color: '#ff7878', dy: 14 });
+  body(camL, Rt, { alpha: 0.4, nose: '#fff', label: '' });
+  pens[0].note('Yaw turns the outer ring, pitch the middle one, roll the inner one');
+
+  // Right: the same orientation, with a test yaw (orange) and a test roll (blue), made from the same start.
+  const d = dl * DEG;
+  const Ryaw = mul(mul(Rz(ps + d), Ry(th)), Rx(ph)), Rroll = mul(mul(Rz(ps), Ry(th)), Rx(ph - d));
+  pens[1].begin(); camR.begin();
+  worldAxes(camR, 1.7);
+  body(camR, Rt, { alpha: 0.12, nose: 'rgba(255,255,255,0.35)', label: '' });
+  body(camR, Ryaw, { alpha: 0.22, nose: C.ink, label: 'yaw' });
+  body(camR, Rroll, { alpha: 0.22, nose: C.ball, label: 'roll' });
+  const gap = angleOf(mul(tp(Ryaw), Rroll)) / DEG;
+  const between = Math.acos(Math.max(-1, Math.min(1, Math.abs(xax.z)))) / DEG;
+  pens[1].note(gap < 0.5 ? 'The yaw and the roll made the same orientation' : 'The yaw and the roll made different orientations');
+  app.explain(`${nums([['yaw axis and roll axis are', `${between.toFixed(0)}°`, 'apart'], ['the yaw test and the roll test differ by', gap < 0.5 ? '0° (the same)' : `${gap.toFixed(0)}°`], ['pitch', `${pitch}°`]])}
+    <p>A common way to describe an orientation is with three angles: <b>yaw</b> about the vertical, <b>pitch</b> about a horizontal axis that yaw carries round, and <b>roll</b> about the nose, which pitch and yaw carry round. Picture three rings, one inside the other, as in a gyroscope mount. Each ring turns about its own axis, and the axes are all carried by the rings outside.</p>
+    <p>Now raise the nose to 90°, straight up. The nose, the roll axis, now lies <b>along the yaw axis</b> (the two lines on the left become one). Yawing and rolling now turn the body the same way, and the orange and blue test turns on the right give the <b>same</b> orientation. One direction of turning has been lost: no combination of the three angles can tip the nose sideways from there. This is <b>gimbal lock</b>. It happened to the Apollo guidance system, and is why spacecraft and games use quaternions, which have no such place.</p>`);
+}
+
+// ---------- One axis, one angle ----------
+function drawOne() {
+  const a1 = ui.v.t1 * DEG, a2 = ui.v.t2 * DEG, a3 = ui.v.t3 * DEG;
+  const t = tr.running || tr.endedAt ? tr.t : 7;
+  if (tr.running && t > 8.4) tr.finish();
+  const s1 = ease(t / 1.6), s2 = ease((t - 2) / 1.6), s3 = ease((t - 4) / 1.6), sA = ease((t - 1) / 4);
+  const ML = mul(mul(Rz(a3 * s3), Ry(a2 * s2)), Rx(a1 * s1));
+  const Mf = mul(mul(Rz(a3), Ry(a2)), Rx(a1));
+  const { n, ang } = axisAngle(Mf);
+  const MR = Raxis(n, ang * sA);
+  pens[0].begin(); camL.begin(); worldAxes(camL); body(camL, ML);
+  pens[1].begin(); camR.begin(); worldAxes(camR);
+  camR.line([V3.mul(n, -2.1), V3.mul(n, 2.1)], C.spin, 2.2); camR.arrow({ x: 0, y: 0, z: 0 }, V3.mul(n, 2.1), C.spin, 3.5, 'the one axis');
+  body(camR, MR);
+  pens[0].note(t < 2 ? 'Turn 1, about x' : t < 4 ? 'Turn 2, about y' : t < 6 ? 'Turn 3, about z' : 'Done');
+  pens[1].note(t < 1 ? 'Waiting' : 'One turn, about the yellow axis');
+  const same = angleOf(mul(tp(Mf), Mf)) < 1e-9;
+  app.explain(`${nums([['the single axis', `(${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)})`], ['the single angle', `${(ang / DEG).toFixed(1)}°`], ['the two blocks end', 'the same']])}
+    <p>However many turns you make, one after the other, about any axes, the end result can always be reached by <b>one turn about one fixed axis</b>. This is <b>Euler's rotation theorem</b>. The left block takes three turns. The right block takes one turn about the yellow axis, and ends exactly where the left one ends. A rotation in 3D is therefore always described by an axis (two numbers: a direction) and an angle (one number). That is three numbers again, just not three angles added.</p>
+    <p>The axis is the line that does not move, whatever else does. Think of the Earth: the axis is the only line of points that stay in place. The formula that turns any arrow v about the unit axis n by the angle θ is <b>Rodrigues' formula</b>: v cos θ + (n × v) sin θ + n (n · v)(1 − cos θ). It uses the cross product from the previous page, and the sine and cosine of the angle, as the circle gives them.</p>`);
+}
+
+// ---------- A turn of 720 degrees ----------
+function drawDouble() {
+  const az = ui.v.az * DEG, el = ui.v.el * DEG, tot = ui.v.tot;
+  const n = { x: Math.cos(el) * Math.cos(az), y: Math.cos(el) * Math.sin(az), z: Math.sin(el) };
+  const t = tr.running || tr.endedAt ? tr.t : 6;
+  if (tr.running && t > 8) tr.finish();
+  const th = tot * ease(Math.min(1, t / 5));
+  const M = Raxis(n, th * DEG);
+  pens[0].begin(); camL.begin(); worldAxes(camL);
+  camL.line([V3.mul(n, -2.1), V3.mul(n, 2.1)], C.spin, 2.2); camL.arrow({ x: 0, y: 0, z: 0 }, V3.mul(n, 2.1), C.spin, 3.5, 'axis');
+  body(camL, M);
+  pens[0].note(`Turned by ${th.toFixed(0)}°`);
+  const q = pens[1].begin();
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: 720, y0: -1.15, y1: 1.15, title: 'The four numbers of the quaternion, against the turn', xTicks: 8, yTicks: 4, fmtX: (v) => `${v}°`, fmtY: (v) => v.toFixed(1), xTitle: 'turn about the axis' });
+  ch.band(360, 361, 'rgba(255,255,255,0.0)');
+  const W = [], X = [], Y = [], Z = [];
+  for (let a = 0; a <= 720; a += 4) { const c = Math.cos(a * DEG / 2), s = Math.sin(a * DEG / 2); W.push({ x: a, y: c }); X.push({ x: a, y: n.x * s }); Y.push({ x: a, y: n.y * s }); Z.push({ x: a, y: n.z * s }); }
+  ch.hline(0, 'rgba(255,255,255,0.3)', [1, 0]);
+  ch.line(X, 'rgba(255,110,110,0.8)', 2); ch.line(Y, 'rgba(110,225,140,0.8)', 2); ch.line(Z, 'rgba(110,170,255,0.8)', 2); ch.line(W, '#fff', 3.2);
+  ch.vline(360, 'rgba(255,213,79,0.6)'); ch.vline(720, 'rgba(255,213,79,0.6)');
+  ch.text('looks like no turn, but w = −1', 360, -0.95, { align: 'center', size: 10.5, color: C.spin });
+  ch.text('w = +1', 715, 0.95, { align: 'right', size: 10.5, color: C.spin });
+  ch.dot(th, Math.cos(th * DEG / 2), '#fff', 6.5);
+  const w = Math.cos(th * DEG / 2);
+  app.explain(`${nums([['turn', `${th.toFixed(0)}°`], ['w = cos(turn / 2)', w.toFixed(3)], ['the block looks', Math.abs(((th % 360) + 360) % 360) < 1 || Math.abs((((th % 360) + 360) % 360) - 360) < 1 ? 'untouched' : 'turned']])}
+    <p>A <b>quaternion</b> describes a turn by four numbers: w = cos(θ/2), and the axis times sin(θ/2). The half angle is the surprise. Turn the block by 360° and it looks exactly as it did at the start, but <b>w has gone from +1 to −1</b>. Only after 720° is the quaternion back at +1. So a full turn is not the same as no turn, as far as the quaternion is concerned. Two quaternions, q and −q, describe the same turn.</p>
+    <p>This is not just bookkeeping. It matters in the real world. If a cup of water on your hand is turned by 360° while your arm stays attached, your arm is twisted. It cannot be untwisted by moving your hand in a loop, until you turn another 360° (the "plate trick" and the "belt trick"). The same 720° rule governs electrons and other particles of spin one half: they need two full turns to return to themselves. A rotation matrix hides this, and the quaternion shows it.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'order') drawOrder(); else if (m === 'gimbal') drawGimbal(); else if (m === 'one') drawOne(); else drawDouble();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>
