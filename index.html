@@ -50,6 +50,9 @@
   .view h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
   .view h3 small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
   .view canvas { flex: 1; min-height: 0; width: 100%; border-radius: 12px; background: #070c16; border: 1px solid var(--line); }
+  .view .gl { flex: 1; min-height: 0; position: relative; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #070c16; }
+  .view .gl[hidden], .view canvas[hidden] { display: none; }
+  .view .gl canvas { position: absolute; inset: 0; width: 100%; height: 100%; border: none; border-radius: 0; touch-action: none; }
   #bottom { display: grid; grid-template-columns: 1fr 260px; gap: 12px; }
   #explain { font-size: 13px; }
   #explain p { margin: 4px 0; }
@@ -68,7 +71,7 @@
     #controls { margin: 12px; }
     main { padding: 0 12px 12px; }
     #views { grid-template-columns: 1fr; }
-    .view canvas { height: 78vw; flex: none; }
+    .view canvas, .view .gl { height: 78vw; flex: none; }
     #bottom { grid-template-columns: 1fr; }
   }
 </style>
@@ -116,6 +119,7 @@
       <label>What</label>
       <div class="chips">
         <button data-preset="cannon" class="on">Cannon shell</button>
+        <button data-preset="ballistic">Long-range shells, north and south</button>
         <button data-preset="foucault">Foucault pendulum</button>
         <button data-preset="storm">Storm winds</button>
         <button data-preset="trades">Trade winds</button>
@@ -124,6 +128,11 @@
         <button data-preset="sink">Sink drain</button>
         <button data-preset="tower">Dropped from a tower</button>
       </div>
+    </div>
+    <div class="row" id="dimRow">
+      <label>View</label>
+      <div class="chips"><button id="v2d" class="on">2D</button><button id="v3d">3D globe</button></div>
+      <div class="sub" id="dimNote" style="margin:4px 0 0"></div>
     </div>
     <label class="check" id="aloftRow" hidden><input id="aloft" type="checkbox" /> High up, where the air hardly rubs on the ground</label>
     <div class="row" id="vehicleRow" hidden>
@@ -169,8 +178,8 @@
 
 <main>
   <div id="views">
-    <div class="view"><h3 id="capL"></h3><canvas id="left"></canvas></div>
-    <div class="view"><h3 id="capR"></h3><canvas id="right"></canvas></div>
+    <div class="view"><h3 id="capL"></h3><canvas id="left"></canvas><div class="gl" id="glL" hidden></div></div>
+    <div class="view"><h3 id="capR"></h3><canvas id="right"></canvas><div class="gl" id="glR" hidden></div></div>
   </div>
   <div id="bottom">
     <div id="explain" class="panel"></div>
@@ -180,6 +189,10 @@
 
 <script type="module">
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 
 // ---------- Constants and small helpers ----------
 
@@ -211,6 +224,7 @@ const state = {
   preset: 'cannon',
   fromEdge: true,
   playKind: 'round', // the roundabout, or the spinning space station
+  view3d: false, // On Earth: the 3D globes, for the cases that cover a large part of the Earth
   vehicle: 250, // speed (m/s) for East or west
   running: false,
   paused: false,
@@ -279,7 +293,8 @@ function makeScene() {
   }
   if (state.preset === 'foucault') return { kind: 'foucault', lat, wReal, timeScale: 3600 * Number($('slow').value) * 2 };
   if (state.preset === 'storm') return { kind: 'storm', lat, aloft: $('aloft').checked, timeScale: 6 * 3600 * Number($('slow').value) };
-  if (state.preset === 'trades') return { kind: 'trades', timeScale: 2 * 86400 * Number($('slow').value) };
+  if (state.preset === 'trades') return { kind: 'trades', timeScale: 2 * 86400 * Number($('slow').value), sync3d: true };
+  if (state.preset === 'ballistic') return { kind: 'ballistic', lat, shots: shellShots(lat), timeScale: 120 * Number($('slow').value), sync3d: true };
   if (state.preset === 'loops') return { kind: 'loops', lat, timeScale: 12 * 3600 * Number($('slow').value) };
   if (state.preset === 'eotvos') return { kind: 'eotvos', lat, v: state.vehicle, timeScale: 1 };
   return { kind: 'tower', lat, h: 100, boost: boost * 100 };
@@ -819,6 +834,334 @@ function drawTower(t) {
   return { T, real, done: t >= T };
 }
 
+// ---------- Long-range shells, north and south ----------
+//
+// Computed in space, around a round Earth that turns: each shell leaves the ground at 5.5 km/s
+// relative to the ground, 45° up, toward north or south, and also keeps the ground's own speed to
+// the east. Gravity pulls it to Earth's centre. It lands where the turning ground is when it comes
+// down. The same flights on an Earth that does not turn give the places it was aimed at.
+//
+// Coordinates: metres, Earth's axis along +y (north), longitude 0 along +x, east along -z.
+
+const R_E = 6.371e6, MU_E = 3.986004e14;
+const SHELL_SPEED = 5500, SHELL_ELEVATION = 45 * DEG;
+
+const v3 = (x, y, z) => ({ x, y, z });
+const vadd = (a, b) => v3(a.x + b.x, a.y + b.y, a.z + b.z);
+const vmul = (a, k) => v3(a.x * k, a.y * k, a.z * k);
+const vlen = (a) => Math.hypot(a.x, a.y, a.z);
+/** Turn a point around Earth's axis (+y) by angle a, toward the east. */
+const turnEast = (p, a) => v3(p.x * Math.cos(a) + p.z * Math.sin(a), p.y, -p.x * Math.sin(a) + p.z * Math.cos(a));
+const latLon = (p) => ({ lat: Math.asin(p.y / vlen(p)), lon: Math.atan2(-p.z, p.x) });
+
+/** One flight: points in space every 2 s (with their times), until it lands. `w`: Earth's turn rate. */
+function shellFlight(lat, dir, w) {
+  const up = v3(Math.cos(lat), Math.sin(lat), 0);
+  const north = v3(-Math.sin(lat), Math.cos(lat), 0);
+  let r = vmul(up, R_E);
+  // The ground's own speed: Earth's turn, ω × r (east, -z here).
+  const ground = v3(0, 0, -w * r.x);
+  let v = vadd(vadd(vmul(north, dir * SHELL_SPEED * Math.cos(SHELL_ELEVATION)), vmul(up, SHELL_SPEED * Math.sin(SHELL_ELEVATION))), ground);
+  const acc = (p) => vmul(p, -MU_E / vlen(p) ** 3);
+  const pts = [{ t: 0, p: r }];
+  const dt = 2;
+  for (let t = dt; t < 4 * 3600; t += dt) {
+    const k1r = v, k1v = acc(r);
+    const k2r = vadd(v, vmul(k1v, dt / 2)), k2v = acc(vadd(r, vmul(k1r, dt / 2)));
+    const k3r = vadd(v, vmul(k2v, dt / 2)), k3v = acc(vadd(r, vmul(k2r, dt / 2)));
+    const k4r = vadd(v, vmul(k3v, dt)), k4v = acc(vadd(r, vmul(k3r, dt)));
+    const nr = vadd(r, vmul(vadd(vadd(k1r, vmul(k2r, 2)), vadd(vmul(k3r, 2), k4r)), dt / 6));
+    const nv = vadd(v, vmul(vadd(vadd(k1v, vmul(k2v, 2)), vadd(vmul(k3v, 2), k4v)), dt / 6));
+    if (vlen(nr) <= R_E) {
+      // The landing, between the last two points.
+      const f = (vlen(r) - R_E) / (vlen(r) - vlen(nr));
+      const land = vadd(r, vmul(vadd(nr, vmul(r, -1)), f));
+      pts.push({ t: t - dt + f * dt, p: vmul(land, R_E / vlen(land)) });
+      break;
+    }
+    r = nr;
+    v = nv;
+    pts.push({ t, p: r });
+  }
+  return pts;
+}
+
+/** The point of a flight at time t (interpolated), and the points up to then. */
+function flightUpTo(pts, t) {
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (pts[i].t <= t) { out.push(pts[i]); continue; }
+    const a = pts[i - 1], b = pts[i];
+    const f = (t - a.t) / (b.t - a.t);
+    out.push({ t, p: vadd(a.p, vmul(vadd(b.p, vmul(a.p, -1)), f)) });
+    break;
+  }
+  return out;
+}
+
+/** Both flights, with the spin and without it, and where each lands against its aim. */
+function shellShots(lat) {
+  const shots = [];
+  for (const dir of [1, -1]) {
+    const real = shellFlight(lat, dir, OMEGA);
+    const aim = shellFlight(lat, dir, 0);
+    const end = real[real.length - 1], aimEnd = aim[aim.length - 1];
+    // Where it lands on the ground, against the aimed place (both in Earth's own frame).
+    const landed = latLon(turnEast(end.p, -OMEGA * end.t));
+    const aimed = latLon(aimEnd.p);
+    const east = (((landed.lon - aimed.lon + 3 * Math.PI) % (2 * Math.PI)) - Math.PI) * R_E * Math.cos(aimed.lat);
+    const range = (aimed.lat - lat) * R_E * dir;
+    shots.push({ dir, real, aim, T: end.t, east, range });
+  }
+  return shots;
+}
+
+/** The 2D maps: ground tracks around the site, x east and y north (m). */
+function drawBallistic(t) {
+  const sc = scene;
+  const R = 4800e3;
+  scene.R = R;
+  const lat0 = sc.lat;
+  // East-west distances at each point's own latitude, so that a miss shows at its true size.
+  const map = (ll) => ({ x: (((ll.lon + 3 * Math.PI) % (2 * Math.PI)) - Math.PI) * R_E * Math.cos(ll.lat), y: (ll.lat - lat0) * R_E });
+  const T = Math.max(...sc.shots.map((s) => s.T));
+  const tt = Math.min(t, T);
+  for (const [canvas, spin, title] of [[views.left, false, 'If Earth did not turn: straight north and south'], [views.right, true, 'On the turning Earth: both land off to the side']]) {
+    const F = frame(fit(canvas), R);
+    F.ctx.clearRect(0, 0, F.w, F.h);
+    // Latitude lines every 10°.
+    for (let l = -80; l <= 80; l += 10) {
+      const y = (l * DEG - lat0) * R_E;
+      if (Math.abs(y) > R * 1.2) continue;
+      line(F, [{ x: -R * 1.3, y }, { x: R * 1.3, y }], l === 0 ? 'rgba(255,213,79,0.5)' : 'rgba(255,255,255,0.12)', l === 0 ? 1.5 : 1, l === 0 ? null : [4, 6]);
+      const q = F.P({ x: -R * 0.98, y });
+      F.ctx.fillStyle = 'rgba(255,255,255,0.55)'; F.ctx.font = `600 ${F.px(10.5)}px system-ui`; F.ctx.textAlign = 'left'; F.ctx.textBaseline = 'bottom';
+      F.ctx.fillText(l === 0 ? 'equator' : `${Math.abs(l)}° ${l > 0 ? 'N' : 'S'}`, q.x, q.y - F.px(2));
+    }
+    for (const s of sc.shots) {
+      const aimTrack = s.aim.map((q) => map(latLon(q.p)));
+      if (spin) {
+        // The aim, dashed; the real ground track, up to now.
+        line(F, aimTrack, C.aim, 1.4, [6, 6]);
+        dot(F, aimTrack[aimTrack.length - 1], C.friend, 6);
+        const real = flightUpTo(s.real, tt).map((q) => map(latLon(turnEast(q.p, -OMEGA * q.t))));
+        line(F, real, C.ink, 3);
+        if (real.length) dot(F, real[real.length - 1], tt >= s.T ? C.ink : '#ffffff', 5);
+      } else {
+        const upTo = flightUpTo(s.aim, tt).map((q) => map(latLon(q.p)));
+        line(F, upTo, C.ball, 3);
+        dot(F, aimTrack[aimTrack.length - 1], C.friend, 6);
+        if (upTo.length) dot(F, upTo[upTo.length - 1], '#ffffff', 5);
+      }
+    }
+    dot(F, { x: 0, y: 0 }, C.you, 7);
+    note(F, title);
+    const e = F.P({ x: R * 0.95, y: -R * 0.95 });
+    F.ctx.fillStyle = 'rgba(255,255,255,0.6)'; F.ctx.textAlign = 'right'; F.ctx.textBaseline = 'bottom';
+    F.ctx.fillText('east →', e.x, e.y);
+  }
+  return t >= T;
+}
+
+// ---------- 3D: the same, on two globes ----------
+//
+// For the cases that cover a large part of the Earth. Left and right show the same as in 2D. The
+// globes turn with the mouse or a finger; when the two show the same place, they turn together.
+
+const SUPPORTS_3D = new Set(['ballistic', 'trades', 'storm']);
+const earthTexture = new THREE.TextureLoader().load('earth.webp');
+earthTexture.colorSpace = THREE.SRGBColorSpace;
+
+function makeGlobeView(box) {
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setClearColor(0x070c16);
+  box.appendChild(renderer.domElement);
+  const scene3 = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(32, 1, 0.01, 100);
+  camera.position.set(3.2, 0.8, 0);
+  scene3.add(new THREE.AmbientLight(0xffffff, 1.1));
+  const light = new THREE.DirectionalLight(0xffffff, 1.3);
+  light.position.set(4, 2, 2);
+  scene3.add(light);
+  const earth = new THREE.Group();
+  scene3.add(earth);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 96, 64), new THREE.MeshStandardMaterial({ map: earthTexture, roughness: 0.95 }));
+  // (The sphere's texture puts longitude 0 on +x and east toward -z, as the flights here.)
+  earth.add(ball);
+  // Latitude and longitude lines every 30°, turning with Earth.
+  const grid = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
+  for (let l = -60; l <= 60; l += 30) {
+    const pts = [];
+    for (let i = 0; i <= 96; i++) { const a = (i / 96) * 2 * Math.PI; pts.push(new THREE.Vector3(Math.cos(l * DEG) * Math.cos(a) * 1.002, Math.sin(l * DEG) * 1.002, -Math.cos(l * DEG) * Math.sin(a) * 1.002)); }
+    earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), l === 0 ? new THREE.LineBasicMaterial({ color: 0xffd54f, transparent: true, opacity: 0.5 }) : grid));
+  }
+  for (let m = 0; m < 360; m += 30) {
+    const pts = [];
+    for (let i = 0; i <= 48; i++) { const l = -90 + (i / 48) * 180; pts.push(new THREE.Vector3(Math.cos(l * DEG) * Math.cos(m * DEG) * 1.002, Math.sin(l * DEG) * 1.002, -Math.cos(l * DEG) * Math.sin(m * DEG) * 1.002)); }
+    earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), grid));
+  }
+  // Earth's axis, which does not turn.
+  scene3.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, -1.35, 0), new THREE.Vector3(0, 1.35, 0)]), new THREE.LineBasicMaterial({ color: 0xffd54f, transparent: true, opacity: 0.6 })));
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enablePan = false;
+  controls.minDistance = 1.4;
+  controls.maxDistance = 8;
+  controls.rotateSpeed = 0.6;
+  return { box, renderer, scene: scene3, camera, earth, controls, lines: new Map(), dots: new Map(), used: new Set(), view: '' };
+}
+
+let globes = null;
+function ensureGlobes() {
+  if (globes) return globes;
+  globes = [makeGlobeView($('glL')), makeGlobeView($('glR'))];
+  // Turned together when they show the same place.
+  let syncing = false;
+  globes.forEach((g, i) => g.controls.addEventListener('change', () => {
+    if (syncing || !scene.sync3d) return;
+    syncing = true;
+    const o = globes[1 - i];
+    o.camera.position.copy(g.camera.position);
+    o.controls.update();
+    syncing = false;
+  }));
+  return globes;
+}
+
+/** A point on (or above) the globe, in globe units (Earth's radius = 1), from metres. */
+const toGlobe = (p, lift = 1.004) => { const k = Math.max(lift, vlen(p) / R_E) / vlen(p); return new THREE.Vector3(p.x * k, p.y * k, p.z * k); };
+/** A point of the ground from latitude and longitude (rad). */
+const ground = (lat, lon) => v3(R_E * Math.cos(lat) * Math.cos(lon), R_E * Math.sin(lat), -R_E * Math.cos(lat) * Math.sin(lon));
+/** A local map point (x east, y north, m) around a centre (lat, lon), on the ground. */
+const localToGround = (c, q) => { const lat = c.lat + q.y / R_E; return ground(lat, c.lon + q.x / (R_E * Math.max(0.05, Math.cos(lat)))); };
+
+function setLine3(g, key, pts, color, width = 3, dashed = false) {
+  let l = g.lines.get(key);
+  if (!l) {
+    l = new Line2(new LineGeometry(), new LineMaterial({ color, linewidth: width, transparent: true, dashed, dashSize: 0.025, gapSize: 0.018 }));
+    l.frustumCulled = false;
+    g.scene.add(l);
+    g.lines.set(key, l);
+  }
+  g.used.add(key);
+  l.visible = pts.length > 1;
+  if (pts.length > 1) {
+    l.geometry.dispose();
+    const geo = new LineGeometry();
+    geo.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+    l.geometry = geo;
+    if (dashed) l.computeLineDistances();
+  }
+  l.material.color.set(color);
+  l.material.resolution.set(g.box.clientWidth, g.box.clientHeight);
+}
+function setDot3(g, key, p, color, size = 0.018) {
+  let d = g.dots.get(key);
+  if (!d) {
+    d = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), new THREE.MeshBasicMaterial({ color }));
+    g.scene.add(d);
+    g.dots.set(key, d);
+  }
+  g.used.add(key);
+  d.visible = true;
+  d.material.color.set(color);
+  d.position.copy(p);
+  d.scale.setScalar(size);
+}
+
+/** Point a globe's camera at a place, the first time a view is shown (later the user turns it). */
+function aimCamera(g, key, at, dist = 4.3) {
+  if (g.view === key) return;
+  g.view = key;
+  const dir = toGlobe(at, 1).normalize();
+  g.camera.position.copy(dir.multiplyScalar(dist));
+  g.controls.target.set(0, 0, 0);
+  g.controls.update();
+}
+
+function renderGlobes() {
+  for (const g of globes) {
+    const w = g.box.clientWidth, h = g.box.clientHeight;
+    if (w < 10 || h < 10) continue;
+    const size = g.renderer.getSize(new THREE.Vector2());
+    if (size.x !== w || size.y !== h) {
+      g.renderer.setSize(w, h, false);
+      g.camera.aspect = w / h;
+      g.camera.updateProjectionMatrix();
+    }
+    for (const [k, l] of g.lines) if (!g.used.has(k)) l.visible = false;
+    for (const [k, d] of g.dots) if (!g.used.has(k)) d.visible = false;
+    g.controls.update();
+    g.renderer.render(g.scene, g.camera);
+    g.used.clear();
+  }
+}
+
+/** One frame of the 3D views. Returns true when the motion has ended. */
+function draw3D(t) {
+  const [L, Rg] = ensureGlobes();
+  const sc = scene;
+  let done = false;
+  if (sc.kind === 'ballistic') {
+    const T = Math.max(...sc.shots.map((s) => s.T));
+    const tt = Math.min(t, T);
+    const site = ground(sc.lat, 0);
+    aimCamera(L, `ballistic${sc.lat}`, vadd(site, v3(0, 0, -0.4 * R_E)));
+    aimCamera(Rg, `ballistic${sc.lat}`, vadd(site, v3(0, 0, -0.4 * R_E)));
+    // Left: in space. Earth turns; the shells fly their paths through space.
+    L.earth.rotation.y = OMEGA * tt;
+    Rg.earth.rotation.y = 0;
+    setDot3(L, 'site', toGlobe(turnEast(site, OMEGA * tt)), C.you, 0.022);
+    setDot3(Rg, 'site', toGlobe(site), C.you, 0.022);
+    sc.shots.forEach((s, i) => {
+      const aimEnd = s.aim[s.aim.length - 1].p;
+      setDot3(L, `aim${i}`, toGlobe(turnEast(aimEnd, OMEGA * tt)), C.friend, 0.02);
+      setDot3(Rg, `aim${i}`, toGlobe(aimEnd), C.friend, 0.02);
+      const flown = flightUpTo(s.real, tt);
+      setLine3(L, `shot${i}`, flown.map((q) => toGlobe(q.p)), C.ball, 3);
+      if (flown.length) setDot3(L, `ball${i}`, toGlobe(flown[flown.length - 1].p), '#ffffff', 0.016);
+      // Right: on the ground. The same flight in Earth's own frame, and the aimed path.
+      setLine3(Rg, `aimpath${i}`, s.aim.map((q) => toGlobe(q.p)), C.aim, 1.5, true);
+      const fixed = flown.map((q) => toGlobe(turnEast(q.p, -OMEGA * q.t)));
+      setLine3(Rg, `shot${i}`, fixed, C.ink, 3);
+      if (fixed.length) setDot3(Rg, `ball${i}`, fixed[fixed.length - 1], '#ffffff', 0.016);
+    });
+    done = t >= T;
+  } else if (sc.kind === 'trades') {
+    const tEnd = Math.min(t, 16 * 86400);
+    const centre = { lat: 0, lon: 8 * DEG };
+    aimCamera(L, 'trades', ground(0, 8 * DEG), 4.3);
+    aimCamera(Rg, 'trades', ground(0, 8 * DEG), 4.3);
+    L.earth.rotation.y = 0;
+    Rg.earth.rotation.y = 0;
+    for (const [g, spin] of [[L, false], [Rg, true]]) {
+      tradePaths(tEnd, spin).forEach((pts, i) => {
+        const on = pts.map((q) => toGlobe(localToGround({ lat: 0, lon: centre.lon }, { x: q.x, y: q.y })));
+        setLine3(g, `trade${i}`, on, C.ball, 2.5);
+        if (on.length) setDot3(g, `tradeEnd${i}`, on[on.length - 1], '#ffffff', 0.011);
+      });
+    }
+    done = tEnd >= 16 * 86400;
+  } else if (sc.kind === 'storm') {
+    const tEnd = Math.min(t, 3 * 86400);
+    const lat = Math.abs(sc.lat);
+    const [north, south] = stormPaths(sc.lat, tEnd, sc.aloft);
+    for (const [g, paths, c] of [[L, north, { lat, lon: 0 }], [Rg, south, { lat: -lat, lon: 0 }]]) {
+      g.earth.rotation.y = 0;
+      aimCamera(g, `storm${c.lat}`, ground(c.lat, c.lon), 2.3);
+      setDot3(g, 'low', toGlobe(ground(c.lat, c.lon)), C.friend, 0.015);
+      paths.forEach((pts, i) => {
+        const on = pts.map((q) => toGlobe(localToGround(c, q)));
+        setLine3(g, `storm${i}`, on, C.ball, 2.5);
+        if (on.length) setDot3(g, `stormEnd${i}`, on[on.length - 1], '#ffffff', 0.009);
+      });
+    }
+    done = tEnd >= 3 * 86400;
+  }
+  renderGlobes();
+  return done;
+}
+
 // ---------- The text under the views ----------
 
 function explain() {
@@ -872,8 +1215,19 @@ function explain() {
       <p>A rule from it, for the north: stand with the wind at your back, and the low is on your <b>left</b> (in the south, on your right). Near the ground (switch off "High up") friction lets the air cross toward the low, which is why storms spiral in.</p>`;
   } else if (sc.kind === 'storm') {
     const lat = Math.abs(Number($('lat').value));
-    box.innerHTML = `<p>Low pressure in the middle pulls the air in (dashed lines). On the turning ground the air drifts to the <b>right</b> in the north and to the <b>left</b> in the south, so it spirals in instead of flowing straight: <b>counterclockwise</b> in the north, <b>clockwise</b> in the south.</p>
+    box.innerHTML = `<p>Low pressure in the middle pulls the air in${state.view3d ? '' : ' (dashed lines)'}. On the turning ground the air drifts to the <b>right</b> in the north and to the <b>left</b> in the south, so it spirals in instead of flowing straight: <b>counterclockwise</b> in the north, <b>clockwise</b> in the south.</p>
       <p>The air needs hours to days to arrive, so even Earth's slow turn has time to act. This is why hurricanes turn opposite ways in the two halves of the world, and why they almost never form within about 5° of the equator, where the turning is too weak${lat < 5 ? ' (try a higher latitude)' : ''}. In the picture one second is ${(6 * Number($('slow').value)).toFixed(1)} hours.</p>`;
+  } else if (sc.kind === 'ballistic') {
+    const lat = Number($('lat').value);
+    const side = (e) => `${dist(Math.abs(e))} ${e >= 0 ? 'east' : 'west'}`;
+    const [n, s] = sc.shots;
+    const ground0 = 465.1 * Math.cos(lat * DEG);
+    box.innerHTML = `<div class="nums">
+      <div class="num"><small>fired north: lands from its aim</small><b>${side(n.east)}</b></div>
+      <div class="num"><small>fired south: lands from its aim</small><b>${side(s.east)}</b></div>
+      <div class="num"><small>flight time, range</small><b>${(n.T / 60).toFixed(0)} min</b> · ${dist(Math.abs(n.range))}</div></div>
+      <p>Each shell leaves at 5.5 km/s, 45° up, and also keeps the speed of the ground under it: here Earth carries the ground east at <b>${Math.round(ground0)} m/s</b> (465 m/s at the equator, less toward the poles).</p>
+      <p>Fired <b>toward the pole</b>, it arrives over ground that moves east more slowly than it does: it runs ahead and lands <b>east</b>. Fired <b>toward the equator</b>, the ground there moves east faster than the shell: it lands <b>west</b>. In both cases that is to the right of its path in the north and to the left in the south, the same rule as everywhere. Over a few thousand kilometers the miss is tens to hundreds of kilometers. Switch to <b>3D globe</b> to see the flights through space while Earth turns under them.</p>`;
   } else if (sc.kind === 'trades') {
     box.innerHTML = `<p>The sun heats the air most near the equator. It rises there, and near the ground air flows in from about 30° north and south to take its place. Without Earth's spin it would blow straight north or south (left).</p>
       <p>On the turning Earth it drifts to the right in the north and to the left in the south: in both it turns <b>west</b>. So the trade winds blow <b>from the northeast</b> and <b>from the southeast</b>. Sailing ships used them for centuries to cross the oceans westward, as Columbus did in 1492. In the picture one second is ${(2 * Number($('slow').value)).toFixed(1)} days.</p>`;
@@ -999,12 +1353,21 @@ function labels() {
   $('slowV').textContent = `${Math.round(Number($('slow').value) * 100)}%`;
   const kind = state.mode === 'earth' ? state.preset : state.playKind === 'station' ? 'station' : 'play';
   $('boostRow').hidden = !(kind === 'cannon' || kind === 'sink' || kind === 'tower');
+  // 2D or 3D: the 3D globes for the cases that cover a large part of the Earth.
+  const can3d = state.mode === 'earth' && SUPPORTS_3D.has(kind);
+  $('dimRow').hidden = state.mode !== 'earth';
+  $('v3d').disabled = !can3d;
+  $('v2d').classList.toggle('on', !(state.view3d && can3d));
+  $('v3d').classList.toggle('on', state.view3d && can3d);
+  $('dimNote').textContent = can3d
+    ? (state.view3d ? 'Drag a globe to turn it. Scroll or pinch to zoom.' : 'This one covers a large part of the Earth: the 3D globe shows it on the round Earth.')
+    : 'This one happens on a small patch of ground: the flat view shows it fully.';
   $('aloftRow').hidden = kind !== 'storm';
   $('vehicleRow').hidden = kind !== 'eotvos';
   $('vehicleV').textContent = `${state.vehicle} m/s`;
   $('ringV').textContent = `${Math.round(10 ** Number($('ring').value))} m`;
   $('go').disabled = kind === 'eotvos';
-  $('go').textContent = kind === 'foucault' ? 'Start the pendulum' : kind === 'storm' ? 'Start the storms' : kind === 'tower' ? 'Drop' : kind === 'sink' ? 'Pull the plug' : kind === 'cannon' ? 'Fire' : kind === 'station' ? 'Let go' : kind === 'trades' || kind === 'loops' ? 'Start' : kind === 'eotvos' ? 'Always on' : 'Throw';
+  $('go').textContent = kind === 'foucault' ? 'Start the pendulum' : kind === 'storm' ? 'Start the storms' : kind === 'tower' ? 'Drop' : kind === 'sink' ? 'Pull the plug' : kind === 'cannon' || kind === 'ballistic' ? 'Fire' : kind === 'station' ? 'Let go' : kind === 'trades' || kind === 'loops' ? 'Start' : kind === 'eotvos' ? 'Always on' : 'Throw';
   const caps = {
     play: ['Not turning', 'Turning with the roundabout'],
     station: ['Outside the station, not turning', 'Inside, turning with the station'],
@@ -1012,6 +1375,7 @@ function labels() {
     loops: ['North', 'South'],
     eotvos: ['From above the north pole', 'On the scale'],
     cannon: ['From space', 'From the ground'],
+    ballistic: state.view3d ? ['From space, not turning', 'From the ground, turning with Earth'] : ['Without Earth\u2019s spin', 'With Earth\u2019s spin'],
     sink: ['From space', 'From the ground'],
     foucault: ['From space', 'From the ground'],
     storm: ['North', 'South'],
@@ -1052,6 +1416,8 @@ document.querySelectorAll('[data-vehicle]').forEach((b) => b.addEventListener('c
   reset();
 }));
 $('aloft').addEventListener('change', reset);
+$('v2d').addEventListener('click', () => { state.view3d = false; reset(); });
+$('v3d').addEventListener('click', () => { state.view3d = true; reset(); });
 document.querySelectorAll('[data-lat]').forEach((b) => b.addEventListener('click', () => { $('lat').value = b.dataset.lat; reset(); }));
 for (const id of ['rpm', 'speed', 'lat', 'boost', 'slow', 'ring']) $(id).addEventListener('input', reset);
 $('showSum').addEventListener('change', () => {});
@@ -1069,7 +1435,17 @@ function tick(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (state.running && !state.paused) state.t += dt * (scene.timeScale ?? 1);
-  if (scene.kind === 'turntable') {
+  // The 3D globes in place of the flat views, when chosen and possible.
+  const use3d = state.mode === 'earth' && state.view3d && SUPPORTS_3D.has(scene.kind);
+  for (const [c, g] of [['left', 'glL'], ['right', 'glR']]) {
+    if ($(c).hidden !== use3d) $(c).hidden = use3d;
+    if ($(g).hidden === use3d) $(g).hidden = !use3d;
+  }
+  if (use3d) {
+    if (draw3D(state.t)) state.running = false;
+  } else if (scene.kind === 'ballistic') {
+    if (drawBallistic(state.t)) state.running = false;
+  } else if (scene.kind === 'turntable') {
     const T = drawTurntable(state.t);
     if (state.t > T + 0.5 * (scene.timeScale ?? 1)) state.running = false;
   } else if (scene.kind === 'foucault') {

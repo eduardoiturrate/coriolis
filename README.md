@@ -17,6 +17,9 @@ and from the turning ground.
   sin φ times Earth's rate. The small globe shows why: Earth's spin split into a part around the
   local vertical (it turns the ground) and a part along the ground (it only tilts it).
   - Cannon shell fired 30 km north: about 90 m to the side at 45°.
+  - Long-range shells, north and south: fired 3,900 km at 5.5 km/s, computed as real flights
+    through space under Earth's gravity. Fired toward the pole a shell lands east of its aim
+    (about 220 km from Paris), fired toward the equator it lands west (about 280 km).
   - Foucault pendulum: the swing keeps its direction in space; the ground turns under it, once in
     a sidereal day divided by sin φ (Paris: about 32 hours).
   - Storm winds: air flowing into a low spirals counterclockwise in the north, clockwise in the
@@ -32,5 +35,14 @@ and from the turning ground.
   - Sink drain: a real drift of hundredths of a millimeter, far too small to decide the direction.
   - Ball dropped from a 100 m tower: it lands about 2 cm east at the equator.
 
+**2D or 3D.** The cases that cover a large part of the Earth (the long-range shells, the storm
+winds and the trade winds) can also be shown on two 3D globes. For the shells, the left globe is
+seen from space and turns under the flights; the right one turns with the ground. Drag a globe to
+turn it, scroll or pinch to zoom. The cases on a small patch of ground stay flat.
+
 Where a real drift is too small to see, the picture spins Earth faster, and says by how much. The
 numbers always use the real spin.
+
+## Credits
+
+`earth.webp`: NASA Blue Marble, by NASA's Earth Observatory (public domain).
