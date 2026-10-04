@@ -180,7 +180,7 @@ function drawLadder() {
   const { R, w } = params();
   const u = ui.v.ul, r0 = 1.5, Tdown = (R - r0) / u;
   const box = R * 1.38;
-  let t = tr.t, onLadder = true, pin, pr, vrel = 0, tEnd = Tdown;
+  let t = tr.t, onLadder = true, pin, pr, vrel = 0, tEnd = Tdown, imp = null;
   if (released) {
     onLadder = false;
     // Free flight in a straight line until the floor.
@@ -188,6 +188,10 @@ function drawLadder() {
     const a = V.dot(v0, v0), b = 2 * V.dot(p0, v0), c = V.dot(p0, p0) - R * R;
     const tf = (-b + Math.sqrt(Math.max(0, b * b - 4 * a * c))) / (2 * a);
     tEnd = t0 + tf;
+    // Where and how you meet the floor: your own velocity in space, against the velocity of the floor there.
+    const pI = V.add(p0, V.mul(v0, tf));
+    imp = { p: pI, t: tEnd, vin: V.len(v0), vfl: w * R, vrelV: V.sub(v0, { x: -w * pI.y, y: w * pI.x }) };
+    imp.vrel = V.len(imp.vrelV);
     const s = Math.min(t, tEnd) - t0;
     if (s < 0) { onLadder = true; }
     else {
@@ -249,8 +253,20 @@ function drawLadder() {
   }
   Rv.note(onLadder ? 'You climb down; you weigh more with each rung' : 'Let go: you curve backward');
 
+  // The moment you meet the floor, after letting go: say how fast, and how that compares.
+  if (imp && tr.t >= imp.t) {
+    const P3i = to3(imp.p), et = { x: -imp.p.y / R, y: imp.p.x / R, z: 0 };
+    cam.dot(P3i, C.warn, 11);
+    cam.arrow(P3i, V3.mul(et, 0.34), C.warn, 3.2, `the floor passes at ${imp.vfl.toFixed(1)} m/s`);
+    cam.text(`you hit the floor at ${imp.vrel.toFixed(1)} m/s, relative to it`, P3i, { dy: -36, size: 12.5, color: C.warn });
+    cam.text(`(you move at ${imp.vin.toFixed(1)} m/s in space, the floor at ${imp.vfl.toFixed(1)} m/s)`, P3i, { dy: -20, size: 11, color: C.warn });
+    const prot = V.rot(imp.p, -w * imp.t), vrotRel = V.rot(imp.vrelV, -w * imp.t);
+    Rv.circle(prot, R * 0.04, { stroke: C.warn, width: 3 });
+    Rv.arrow(prot, V.mul(V.norm(vrotRel), R * 0.24), C.warn, 3.2, `you hit at ${imp.vrel.toFixed(1)} m/s relative to the floor`);
+  }
+
   const side = 2 * w * u * MASS;
-  app.explain(`${nums([['weight now', `${g.toFixed(2)}`, 'g'], ['sideways push of the ladder', `${side.toFixed(0)}`, `N (for ${MASS} kg)`], ['time to climb down', fmt.time(Tdown)], ...(released ? [['you hit the floor at', `${vrel.toFixed(1)}`, 'm/s relative to it']] : [])])}
+  app.explain(`${nums([['weight now', `${g.toFixed(2)}`, 'g'], ['sideways push of the ladder', `${side.toFixed(0)}`, `N (for ${MASS} kg)`], ['time to climb down', fmt.time(Tdown)], ...(imp ? [['you hit the floor at', `${imp.vrel.toFixed(1)}`, 'm/s relative to it'], ['you move at', `${imp.vin.toFixed(1)}`, 'm/s in space'], ['the floor moves at', `${imp.vfl.toFixed(1)}`, 'm/s']] : [])])}
     <p>The safe way down is a ladder along a spoke. The ladder turns with the station, so each rung already moves the right way. Near the hub you hardly weigh anything, and the rungs move slowly. Going outward, you <b>gain weight gradually</b>, and you also have to speed up sideways, because each rung farther out is moving faster. You get the sideways speed by the ladder pushing you <b>forward</b>, with a force of 2 m ω u (the green arrow). From the station's side this is the Coriolis effect: it pushes you backward against the ladder. This push is how the station gives you its spin.</p>
     <p>Let go in the middle (the button), and the push on you stops. You fly off in a straight line with the speed you had, and as the floor turns, the path curves backward. You hit the floor sideways, with the difference between your speed and its speed. Hold on to the ladder.</p>`);
 }

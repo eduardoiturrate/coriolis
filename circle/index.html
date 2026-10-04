@@ -63,11 +63,11 @@ function drawShadows(dt) {
   L.line([{ x: c, y: 0 }, P], 'rgba(255,162,74,0.6)', 2.5);   // the same height, drawn up from there
   L.line([{ x: 0, y: 0 }, { x: 0, y: s }], C.ink, 5);        // the sine: the shadow on the y axis
   L.line([{ x: 0, y: s }, P], 'rgba(79,195,247,0.5)', 1.5, [3, 4]);
-  if (Math.abs(c) > 0.06 && Math.abs(t) < 2.3 && c > 0) { L.dot({ x: 1, y: t }, C.you, 5); L.line([{ x: 1, y: 0 }, { x: 1, y: t }], C.you, 3); }
+  if (Math.abs(c) > 0.06 && Math.abs(t) < 2.3 && c > 0) { L.dot({ x: 1, y: t }, C.you, 5); L.line([{ x: 1, y: 0 }, { x: 1, y: t }], C.you, 3); L.text('tan', { x: 1, y: t / 2 }, { dx: 18, size: 11.5, color: C.you }); }
   L.dot(P, '#fff', 7);
   L.text('cos', { x: c / 2, y: 0 }, { dy: s >= 0 ? 14 : -14, size: 11.5, color: C.ball }); L.text('sin', { x: 0, y: s / 2 }, { dx: c >= 0 ? -18 : 18, size: 11.5, color: C.ink });
   L.text('θ', V.polar(0.42, theta / 2), { size: 12, color: C.spin });
-  L.note('The two shadows of the point are its cosine (blue) and its sine (orange)');
+  L.note('Cosine (blue), sine (orange), tangent (green)');
 
   const R = pens[1].begin();
   const hh = R.ch / 2 - 6, xs = theta / Math.PI;
@@ -83,7 +83,7 @@ function drawShadows(dt) {
 
   app.explain(`${nums([['angle', `${theta.toFixed(2)}`, `radians (${(theta / DEG).toFixed(0)}°)`], ['cos θ', c.toFixed(3)], ['sin θ', s.toFixed(3)], ['cos² + sin²', (c * c + s * s).toFixed(3)]])}
     <p>Put a point on a circle of radius 1, and let it go round. Its position is two numbers: how far across, and how far up. <b>Those two numbers are the cosine and the sine of the angle.</b> That is all they are. Draw the width of the point against the angle and you get the cosine wave. Draw its height and you get the sine wave. One turn is one full wave, and it repeats forever, because the point just keeps going round.</p>
-    <p>The famous rule sin² + cos² = 1 is Pythagoras: the point is at distance 1 from the middle. The tangent (green) is the height where the line through the point cuts the vertical line at the edge. It grows without limit as the point nears the top, where the line becomes vertical.</p>`);
+    <p>The famous rule sin² + cos² = 1 is Pythagoras: the point is at distance 1 from the middle. The <b>tangent</b> is the green segment on the vertical line at the right edge of the circle: its height is where the line through the point (the dashed diagonal) cuts that vertical line. It equals sin θ / cos θ, and it grows without limit as the point nears the top, where the diagonal becomes parallel to the vertical line.</p>`);
 }
 pens[0].pointer({
   down(w) { tr.paused = true; tr.setPause('Go on'); theta = (Math.atan2(w.y, w.x) + TAU) % TAU; },
