@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Induction · Spin</title>
+<meta name="description" content="A magnet moving through a coil makes a voltage, whether the magnet or the coil moves. A turning coil is a generator. A magnet falling through a copper tube is slowed by the currents it makes." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+const G = 9.81, MU0 = 4 * Math.PI * 1e-7;
+
+const app = Spin.app({
+  slug: 'induction',
+  sub: 'A changing magnetic flux through a loop makes a voltage around it. The two views of one event give the same current, for different reasons.',
+  views: [{ caption: '' }, { caption: '' }, { caption: '', span: 2, short: true }],
+  rows: 'minmax(0, 1fr) minmax(0, 0.62fr)',
+  go: 'Move the magnet', loop: true, speed: { min: 0.05, max: 1, value: 0.5, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['magnet', 'Magnet and coil'], ['gen', 'Generator'], ['tube', 'Falling magnet']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('v', { label: 'Speed of the magnet', min: 0.5, max: 4, step: 0.1, value: 2, fmt: (v) => `${v.toFixed(1)} m/s`, show: is('magnet') });
+ui.slider('N', { label: 'Turns of wire in the coil', min: 10, max: 500, step: 10, value: 100, fmt: (v) => String(v), show: (v) => v.mode !== 'tube' });
+ui.check('south', 'Send the south pole first', false, { show: is('magnet') });
+ui.slider('rps', { label: 'Turns a second', min: 0.3, max: 4, step: 0.1, value: 1.5, fmt: (v) => v.toFixed(1), show: is('gen') });
+ui.slider('B', { label: 'Magnetic field', min: 50, max: 500, step: 10, value: 200, fmt: (v) => `${v} mT`, show: is('gen') });
+ui.slider('vt', { label: 'How hard the copper brakes (the speed it settles at)', min: 0.05, max: 1, step: 0.01, value: 0.2, fmt: (v) => `${v.toFixed(2)} m/s`, show: is('tube') });
+
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  if (m === 'magnet') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.62fr)'); app.caption(0, 'In the frame of the coil: the magnet moves'); app.caption(1, 'In the frame of the magnet: the coil moves'); app.caption(2, 'Flux through the coil, and the voltage it makes'); tr.setGo('Move the magnet'); }
+  else if (m === 'gen') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.62fr)'); app.caption(0, 'A coil turning between the poles, seen along its axis'); app.caption(1, 'The same, as a table of what happens'); app.caption(2, 'Flux through the coil, and the voltage it makes'); tr.setGo('Restart'); }
+  else { app.show(2, 2); app.layout(2, 'minmax(0, 1fr)'); app.caption(0, 'Two tubes, two magnets, dropped together'); app.caption(1, 'Speed against time'); tr.setGo('Drop them'); }
+}
+
+// ---------- Helpers ----------
+
+/** A small dial for the voltage: the needle leans one way or the other. */
+function dial(p, value, label, left) {
+  const cx = left ? 60 : p.cw - 56, cy = 62, r = 34;
+  const ctx = p.ctx, px = (n) => p.px(n);
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = px(2);
+  ctx.beginPath(); ctx.arc(px(cx), px(cy), px(r), Math.PI * 1.15, Math.PI * 1.85); ctx.stroke();
+  const a = -Math.PI / 2 + Math.max(-1, Math.min(1, value)) * 1.0;
+  ctx.strokeStyle = value > 0 ? C.ink : C.ball; ctx.lineWidth = px(3);
+  ctx.beginPath(); ctx.moveTo(px(cx), px(cy + 12)); ctx.lineTo(px(cx + (r + 6) * Math.cos(a)), px(cy + 12 + (r + 6) * Math.sin(a))); ctx.stroke();
+  ctx.restore();
+  p.textS(label, cx, cy + 28, { size: 10.5, color: 'rgba(255,255,255,0.7)' });
+}
+/** A wire seen end-on: a dot when the current comes toward you, a cross when it goes away. */
+function wire(p, pt, out, r = 0.0045) {
+  p.circle(pt, r, { fill: 'rgba(255,255,255,0.12)', stroke: out ? C.ink : C.ball, width: 2 });
+  if (out) p.dot(pt, C.ink, 2.5);
+  else { const k = r * 0.55; p.line([{ x: pt.x - k, y: pt.y - k }, { x: pt.x + k, y: pt.y + k }], C.ball, 2); p.line([{ x: pt.x - k, y: pt.y + k }, { x: pt.x + k, y: pt.y - k }], C.ball, 2); }
+}
+
+// ---------- Magnet and coil ----------
+
+const RC = 0.03, MAG_M = 1, MAG_L = 0.05, MAG_H = 0.022, RANGE = 0.3;
+const flux = (d, s) => (s * MU0 * MAG_M * RC * RC) / (2 * (RC * RC + d * d) ** 1.5);
+const emfPer = (d, v, s) => (s * 1.5 * MU0 * MAG_M * RC * RC * d * v) / (RC * RC + d * d) ** 2.5;
+function fieldLines(p, center, sgn) {
+  for (const r0 of [0.022, 0.035, 0.055, 0.085, 0.13]) {
+    for (const side of [1, -1]) {
+      const pts = [];
+      for (let k = 0; k <= 60; k++) { const th = 0.04 + (k / 60) * (Math.PI - 0.08), r = r0 * Math.sin(th) ** 2 * 1.0; pts.push({ x: center + r * Math.cos(th), y: side * r * Math.sin(th) }); }
+      p.line(pts, 'rgba(79,195,247,0.35)', 1.3);
+      const mid = pts[30], dir = pts[31] ? V.sub(pts[31], pts[29]) : { x: 1, y: 0 };
+      p.arrow(mid, V.mul(V.norm(dir), 0.012 * sgn), 'rgba(79,195,247,0.55)', 1.6);
+    }
+  }
+}
+function magnet(p, x, s) {
+  const left = s > 0 ? C.ball : C.friend, right = s > 0 ? C.friend : C.ball;
+  p.rect(x - MAG_L / 2, -MAG_H / 2, x, MAG_H / 2, { fill: left, stroke: '#fff', width: 1.5 });
+  p.rect(x, -MAG_H / 2, x + MAG_L / 2, MAG_H / 2, { fill: right, stroke: '#fff', width: 1.5 });
+  p.text(s > 0 ? 'S' : 'N', { x: x - MAG_L / 4, y: 0 }, { size: 11, color: '#111', weight: 800, shadow: false });
+  p.text(s > 0 ? 'N' : 'S', { x: x + MAG_L / 4, y: 0 }, { size: 11, color: '#111', weight: 800, shadow: false });
+}
+function coil(p, x, out, N) {
+  p.line([{ x, y: -RC }, { x, y: RC }], 'rgba(255,213,79,0.35)', 1.2, [3, 4]);
+  p.circle({ x, y: RC }, 0.0068, { fill: 'rgba(255,162,74,0.25)', stroke: C.ink, width: 2.5 });
+  p.circle({ x, y: -RC }, 0.0068, { fill: 'rgba(255,162,74,0.25)', stroke: C.ink, width: 2.5 });
+  wire(p, { x, y: RC }, out); wire(p, { x, y: -RC }, !out);
+  p.text(`${N} turns`, { x: x, y: RC }, { dy: -16, size: 10.5, color: 'rgba(255,213,79,0.85)' });
+}
+function drawMagnet() {
+  const { v, N, south } = ui.v, s = south ? -1 : 1;
+  const tau = tr.t * 0.15;
+  const d = -RANGE + v * tau;
+  if (d > RANGE + 0.04) tr.finish();
+  const dd = Math.min(d, RANGE + 0.04);
+  const emf = N * emfPer(dd, d > RANGE ? 0 : v, s);
+  const peak = N * Math.max(...[-0.02, -0.0173, 0.0173, 0.02].map((x) => Math.abs(emfPer(x, v, 1))));
+  const out = emf > 0;
+
+  const L = pens[0].begin().box(-RANGE - 0.04, RANGE + 0.04, -0.13, 0.13, 10);
+  fieldLines(L, dd, s);
+  magnet(L, dd, s);
+  coil(L, 0, out, N);
+  L.arrow({ x: dd, y: -0.075 }, { x: 0.06, y: 0 }, C.you, 3, 'moves');
+  dial(L, emf / peak, `${(emf * 1e3).toFixed(0)} mV`);
+  L.note('A changing field makes an electric field that circles the coil');
+  const R = pens[1].begin().box(-RANGE - 0.04, RANGE + 0.04, -0.13, 0.13, 10);
+  fieldLines(R, 0, s);
+  magnet(R, 0, s);
+  coil(R, -dd, out, N);
+  R.arrow({ x: -dd, y: -0.075 }, { x: -0.06, y: 0 }, C.you, 3, 'moves');
+  dial(R, emf / peak, `${(emf * 1e3).toFixed(0)} mV`);
+  R.note('A steady field. The moving wire feels a magnetic force on its charges');
+
+  const q = pens[2].begin();
+  const w = (q.cw - 12) / 2 - 2, Tt = (2 * RANGE) / v + 0.1 / v;
+  const tt = tau;
+  const ds = []; for (let u = 0; u <= Tt; u += Tt / 160) ds.push(u);
+  const ch1 = q.chart({ x: 4, y: 2, w, h: q.ch - 6 }, { x0: 0, x1: Tt * 1e3, y0: 0, y1: N * flux(0, 1) * 1.15 * 1e6, title: 'Flux through all the turns (µWb) against time (ms)', xTicks: 6, yTicks: 4, fmtX: (a) => a.toFixed(0), fmtY: (a) => a.toFixed(0), padB: 22 });
+  ch1.line(ds.map((u) => ({ x: u * 1e3, y: N * flux(-RANGE + v * u, 1) * 1e6 })), 'rgba(79,195,247,0.4)', 2);
+  ch1.line(ds.filter((u) => u <= tt).map((u) => ({ x: u * 1e3, y: N * flux(-RANGE + v * u, s) * s * 1e6 })), C.ball, 3);
+  ch1.vline(Math.min(tt, Tt) * 1e3);
+  const ep = peak * 1.15 * 1e3;
+  const ch2 = q.chart({ x: 8 + w, y: 2, w, h: q.ch - 6 }, { x0: 0, x1: Tt * 1e3, y0: -ep, y1: ep, title: 'Voltage (mV) against time (ms)', xTicks: 6, yTicks: 4, fmtX: (a) => a.toFixed(0), fmtY: (a) => a.toFixed(0), padB: 22 });
+  ch2.hline(0, 'rgba(255,255,255,0.4)', [1, 0]);
+  ch2.line(ds.map((u) => ({ x: u * 1e3, y: N * emfPer(-RANGE + v * u, v, s) * 1e3 })), 'rgba(255,162,74,0.35)', 2);
+  ch2.line(ds.filter((u) => u <= tt).map((u) => ({ x: u * 1e3, y: N * emfPer(-RANGE + v * u, v, s) * 1e3 })), C.ink, 3);
+  ch2.vline(Math.min(tt, Tt) * 1e3);
+
+  const phase = d < -0.05 ? 'is arriving: the flux is growing, so the coil makes a field that pushes back' : d < 0.05 ? 'is passing through: the flux is at its largest, so for an instant the voltage is zero' : 'is leaving: the flux is falling, so the coil makes a field that pulls it back';
+  app.explain(`${nums([['voltage now', `${(emf * 1e3).toFixed(0)}`, 'mV'], ['largest voltage', `${(peak * 1e3).toFixed(0)}`, 'mV'], ['turns', String(N)]])}
+    <p><b>Faraday's law:</b> the voltage around a loop is the rate at which the magnetic flux through it changes: V = −N dΦ/dt. The magnet ${phase}. This is <b>Lenz's law</b>: the induced current always opposes the change that makes it. A faster magnet or more turns give a bigger voltage. A magnet at rest in the coil gives none.</p>
+    <p>The two top views are the same event. <b>Left</b>, the coil is still and the field changes, which makes an electric field that circles the coil. <b>Right</b>, the magnet is still, and the coil moves through its field, so its charges feel the magnetic force q v × B along the wire. The causes look different, and the current is the same. That puzzle helped lead Einstein to relativity.</p>`);
+}
+
+// ---------- Generator ----------
+
+const AREA = 0.01;
+function drawGen() {
+  const { rps, B, N } = ui.v;
+  const w = TAU * rps, Bt = B * 1e-3;
+  const th = TAU * rps * tr.t * 0.4;
+  const turns = (rps * tr.t * 0.4);
+  const emfPeak = N * Bt * AREA * w;
+  const emf = emfPeak * Math.sin(th), fl = N * Bt * AREA * Math.cos(th);
+  const out = emf > 0;
+  const p = pens[0].begin().box(-2, 2, -1.6, 1.6, 8);
+  p.rect(-2.0, -1.2, -1.55, 1.2, { fill: 'rgba(240,98,146,0.4)', stroke: C.friend, width: 2 });
+  p.rect(1.55, -1.2, 2.0, 1.2, { fill: 'rgba(79,195,247,0.4)', stroke: C.ball, width: 2 });
+  p.text('N', { x: -1.78, y: 0 }, { size: 16, weight: 800 }); p.text('S', { x: 1.78, y: 0 }, { size: 16, weight: 800 });
+  for (let y = -1; y <= 1.01; y += 0.5) p.arrow({ x: -1.4, y }, { x: 2.8, y: 0 }, 'rgba(255,255,255,0.28)', 1.6);
+  const u = { x: -Math.sin(th), y: Math.cos(th) }, n = { x: Math.cos(th), y: Math.sin(th) };
+  p.line([V.mul(u, -0.9), V.mul(u, 0.9)], C.ink, 5);
+  p.arrow({ x: 0, y: 0 }, V.mul(n, 0.7), C.spin, 3, 'normal');
+  for (const sg of [1, -1]) { const pt = V.mul(u, sg * 0.9); p.circle(pt, 0.13, { fill: '#0d1420', stroke: (sg > 0) === out ? C.ink : C.ball, width: 3 }); if ((sg > 0) === out) p.dot(pt, C.ink, 3.5); else { p.line([{ x: pt.x - 0.07, y: pt.y - 0.07 }, { x: pt.x + 0.07, y: pt.y + 0.07 }], C.ball, 2.5); p.line([{ x: pt.x - 0.07, y: pt.y + 0.07 }, { x: pt.x + 0.07, y: pt.y - 0.07 }], C.ball, 2.5); } }
+  p.dot({ x: 0, y: 0 }, '#fff', 4);
+  const arc = []; for (let k = 0; k <= 20; k++) arc.push(V.polar(0.35, (k / 20) * th % TAU * 1));
+  p.line(arc, 'rgba(255,213,79,0.6)', 1.5);
+  dial(p, emf / emfPeak, `${emf.toFixed(2)} V`, true);
+  p.note('The coil turns in a steady field');
+
+  const q = pens[1].begin();
+  const rows = [
+    ['Facing the poles (normal along the field)', 'Most flux, but not changing: no voltage'],
+    ['Edge on to the field', 'No flux, but changing fastest: the largest voltage'],
+    ['Each half turn', 'The voltage reverses: alternating current'],
+  ];
+  rows.forEach((r, i) => { q.textS(r[0], 20, 50 + i * 78, { align: 'left', size: 13, color: C.spin }); q.textS(r[1], 20, 74 + i * 78, { align: 'left', size: 13, color: 'rgba(255,255,255,0.8)', weight: 500 }); });
+  q.textS(`Bulb: ${'●'.repeat(Math.max(1, Math.round(Math.abs(emf / emfPeak) * 8)))}`, 20, 52 + 3 * 78, { align: 'left', size: 14, color: `rgba(255,213,79,${0.3 + 0.7 * Math.abs(emf / emfPeak)})` });
+
+  const r = pens[2].begin();
+  const t1 = Math.max(3, turns), t0 = t1 - 3;
+  const wd = (r.cw - 12) / 2 - 2;
+  const ch1 = r.chart({ x: 4, y: 2, w: wd, h: r.ch - 6 }, { x0: t0, x1: t1, y0: -fl * 0 - N * Bt * AREA * 1.15, y1: N * Bt * AREA * 1.15, title: 'Flux (Wb) against turns', xTicks: 6, yTicks: 4, fmtX: (a) => a.toFixed(1), fmtY: (a) => a.toFixed(2), padB: 22 });
+  const ch2 = r.chart({ x: 8 + wd, y: 2, w: wd, h: r.ch - 6 }, { x0: t0, x1: t1, y0: -emfPeak * 1.15, y1: emfPeak * 1.15, title: 'Voltage (V) against turns', xTicks: 6, yTicks: 4, fmtX: (a) => a.toFixed(1), fmtY: (a) => a.toFixed(1), padB: 22 });
+  const f1 = [], f2 = [];
+  for (let s = t0; s <= turns + 1e-9; s += 0.01) { f1.push({ x: s, y: N * Bt * AREA * Math.cos(TAU * s) }); f2.push({ x: s, y: emfPeak * Math.sin(TAU * s) }); }
+  ch1.line(f1, C.ball, 3); ch2.line(f2, C.ink, 3);
+  ch1.dot(turns, fl, '#fff', 5); ch2.dot(turns, emf, '#fff', 5);
+  app.explain(`${nums([['largest voltage', emfPeak.toFixed(2), 'V'], ['average power into a bulb of 10 Ω', `${((emfPeak ** 2) / 2 / 10).toFixed(2)}`, 'W'], ['frequency', rps.toFixed(1), 'Hz']])}
+    <p>The flux through the coil is <b>N B A cosθ</b>, where θ is the angle between the coil's normal and the field. Turning the coil makes it rise and fall as a cosine. The voltage is the <b>rate of change</b> of the flux, which is a sine, a quarter of a turn out of step: largest when the coil is edge-on and the flux is changing fastest, zero when it faces the poles and the flux is at its top. The peak voltage is N B A ω. Faster turning, a stronger field, more turns or a bigger coil all raise it. Every power station spins a coil in a field, or a field around a coil, in this way.</p>`);
+}
+
+// ---------- Falling magnet ----------
+
+function drawTube() {
+  const vt = ui.v.vt, H = 0.6;
+  const t = tr.t;
+  const xCu = vt * t - ((vt * vt) / G) * (1 - Math.exp((-G * t) / vt)), vCu = vt * (1 - Math.exp((-G * t) / vt));
+  const xFree = 0.5 * G * t * t, vFree = G * t;
+  const tFree = Math.sqrt((2 * H) / G), tCu = (() => { let lo = 0, hi = 100; for (let i = 0; i < 60; i++) { const m = (lo + hi) / 2; (vt * m - ((vt * vt) / G) * (1 - Math.exp((-G * m) / vt)) < H ? (lo = m) : (hi = m)); } return lo; })();
+  if (t > tCu + 0.3) tr.finish();
+  const p = pens[0].begin().box(-0.55, 0.55, -0.12, H + 0.14, 10);
+  const tubes = [{ cx: -0.25, x: Math.min(xFree, H), v: Math.min(vFree, G * tFree), done: xFree >= H, col: '#9aa5b5', name: 'plastic tube' }, { cx: 0.25, x: Math.min(xCu, H), v: vCu, done: xCu >= H, col: '#d98e5b', name: 'copper tube' }];
+  tubes.forEach((tb, i) => {
+    p.rect(tb.cx - 0.07, 0, tb.cx + 0.07, H, { fill: i ? 'rgba(217,142,91,0.14)' : 'rgba(154,165,181,0.1)', stroke: tb.col, width: 2.5 });
+    const y = H - 0.03 - tb.x;
+    if (i && !tb.done) for (const off of [0.07, -0.07]) { const strength = Math.min(1, tb.v / Math.max(vt, 0.05)); p.circle({ x: tb.cx, y: y + off }, 0.095, { stroke: `rgba(255,213,79,${0.2 + 0.7 * strength})`, width: 3 }); }
+    p.rect(tb.cx - 0.035, y - 0.03, tb.cx + 0.035, y, { fill: C.friend, stroke: '#fff', width: 1.5 });
+    p.rect(tb.cx - 0.035, y, tb.cx + 0.035, y + 0.03, { fill: C.ball, stroke: '#fff', width: 1.5 });
+    p.text(tb.name, { x: tb.cx, y: H + 0.05 }, { size: 11.5, color: tb.col });
+    p.text(`${(Math.min(t, tb.done ? (i ? tCu : tFree) : t)).toFixed(2)} s`, { x: tb.cx, y: -0.05 }, { size: 11.5, color: 'rgba(255,255,255,0.8)', mono: true });
+  });
+  p.note('Both magnets start at the top at the same moment');
+
+  const q = pens[1].begin();
+  const T = Math.max(tCu * 1.1, 0.5), tt = Math.min(t, T);
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: T, y0: 0, y1: Math.max(1.4 * vt, 0.2), title: 'Speed of the copper-tube magnet (m/s) against time (s)', xTicks: 6, yTicks: 5, fmtX: (a) => a.toFixed(1), fmtY: (a) => a.toFixed(2), padB: 22 });
+  const cu = [], fr = []; for (let s = 0; s <= tt + 1e-9; s += T / 300) { cu.push({ x: s, y: vt * (1 - Math.exp((-G * s) / vt)) }); if (G * s < 1.4 * vt + 2) fr.push({ x: s, y: G * s }); }
+  ch.line(fr, 'rgba(154,165,181,0.8)', 2.5); ch.line(cu, '#d98e5b', 3);
+  ch.hline(vt, 'rgba(255,213,79,0.6)'); ch.text('settles at this speed', T * 0.55, vt, { dy: -8, color: C.spin, size: 11 });
+  ch.text('plastic: keeps speeding up (shown only to the top of the chart)', T * 0.02, Math.max(1.4 * vt, 0.2) * 0.93, { size: 10.5, color: '#aab' });
+  app.explain(`${nums([['plastic tube: falls in', tFree.toFixed(2), 's'], ['copper tube: falls in', tCu.toFixed(2), 's'], ['slower by', `${(tCu / tFree).toFixed(1)}×`]])}
+    <p>Both tubes are the same shape, and both magnets fall at the start with the same pull of gravity. In the plastic tube nothing happens: the magnet falls freely. In the copper tube, the moving magnet makes the flux through each ring of copper change, so currents (<b>eddy currents</b>) circle the tube. By Lenz's law, those currents make a field that <b>opposes the motion</b>: above the magnet they push it up, below it they pull it back. The faster it falls, the stronger the currents, and the stronger the braking, so the magnet soon reaches a steady speed.</p>
+    <p>The lost energy of the fall goes into heat in the copper. The magnet is not touching the tube at all.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'magnet') drawMagnet(); else if (m === 'gen') drawGen(); else drawTube();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

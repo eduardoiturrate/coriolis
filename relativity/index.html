@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Special relativity · Spin</title>
+<meta name="description" content="A light clock shows why moving clocks run slow. A train and two lightning strikes show that simultaneity depends on the observer. A spacetime diagram you can change shows both." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'relativity',
+  sub: 'Two ideas: the laws of physics are the same for everyone moving steadily, and light has the same speed for all of them. Everything else follows.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Start', speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['clock', 'Light clock'], ['train', 'Train and lightning'], ['st', 'Spacetime diagram']]);
+const is = (m) => (v) => v.mode === m;
+const gam = (b) => 1 / Math.sqrt(1 - b * b);
+
+ui.slider('beta', { label: 'Speed, as a part of the speed of light', min: 0, max: 0.99, step: 0.01, value: 0.8, fmt: (v) => `${v.toFixed(2)} c`, show: (v) => v.mode !== 'st', hint: (v) => `Time stretches by γ = ${gam(v.beta).toFixed(2)}.` });
+ui.chips([{ text: '0.5', set: { beta: 0.5 } }, { text: '0.8', set: { beta: 0.8 } }, { text: '0.9', set: { beta: 0.9 } }, { text: '0.99', set: { beta: 0.99 } }], { show: (v) => v.mode !== 'st' });
+ui.slider('sb', { label: 'Relative speed of the two frames', min: -0.95, max: 0.95, step: 0.01, value: 0.5, fmt: (v) => `${v.toFixed(2)} c`, show: is('st') });
+ui.chips([{ text: 'Same frame 0', set: { sb: 0 } }, { text: 'Fast 0.8', set: { sb: 0.8 } }, { text: 'Fast the other way −0.8', set: { sb: -0.8 } }], { show: is('st') });
+ui.section('Events', { show: is('st') });
+ui.chips([{ text: 'Cause and effect', set: { ax: 0.5, at: 2, bx: -2, bt: 1.2 } }, { text: 'Simultaneous (in the first frame)', set: { ax: 2, at: 0, bx: -2, bt: 0 } }, { text: 'Far apart', set: { ax: 2.5, at: 1, bx: -1.5, bt: 2.5 } }], { show: is('st') });
+ui.hint('Drag the orange and pink events in either picture. The white event is where the frames meet.', { show: is('st') });
+ui.slider('ax', { label: 'A', min: -3.5, max: 3.5, step: 0.05, value: 2, fmt: (v) => v.toFixed(2), show: () => false });
+ui.slider('at', { label: 'A', min: -3.5, max: 3.5, step: 0.05, value: 1, fmt: (v) => v.toFixed(2), show: () => false });
+ui.slider('bx', { label: 'A', min: -3.5, max: 3.5, step: 0.05, value: -1, fmt: (v) => v.toFixed(2), show: () => false });
+ui.slider('bt', { label: 'A', min: -3.5, max: 3.5, step: 0.05, value: 2.2, fmt: (v) => v.toFixed(2), show: () => false });
+
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.go.hidden = m === 'st'; tr.pauseBtn.hidden = m === 'st'; tr.loopBox.parentElement.hidden = m === 'st'; tr.speedBox.parentElement.hidden = m === 'st';
+  tr.setGo(m === 'clock' ? 'Start both clocks' : 'Strike!');
+  const caps = {
+    clock: ['In the frame of clock A (orange)', 'In the frame of clock B (blue)'],
+    train: ['In the frame of the platform', 'In the frame of the train'],
+    st: ['First frame: space across, time up', 'Second frame, which moves'],
+  }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+
+// ---------- Light clock ----------
+// Two identical clocks: a pulse of light bounces between two mirrors, and each bounce is one tick. In the frame of
+// either clock, the other one moves, and its pulse has to cover a longer zigzag path, so it ticks more slowly.
+
+const CC = 2, HH = 1.5; // light covers 2 units a second. The mirrors are 1.5 apart.
+function clockRow(p, x, y, tt, label, color, moving, beta, ticks, showPath, startX, dirx) {
+  // Mirrors at y and y+HH, centered on x. The pulse goes up and down: its height depends only on the clock's own time.
+  const tau = tt; // own time of this clock, in seconds
+  const period = (2 * HH) / CC;
+  const ph = (tau % period) / period;
+  const hgt = ph < 0.5 ? ph * 2 : 2 - ph * 2;
+  p.line([{ x: x - 0.7, y }, { x: x + 0.7, y }], '#c9d3df', 5);
+  p.line([{ x: x - 0.7, y: y + HH }, { x: x + 0.7, y: y + HH }], '#c9d3df', 5);
+  p.dot({ x, y: y + hgt * HH }, color, 7);
+  p.text(label, { x, y: y + HH + 0.4 }, { size: 11.5, color });
+  p.text(`${ticks} tick${ticks === 1 ? '' : 's'}`, { x, y: y - 0.45 }, { size: 12.5, color: '#fff', mono: true });
+}
+function drawClock() {
+  const { beta } = ui.v, g = gam(beta);
+  const T = 7;
+  const t = Math.min(tr.t, T);
+  if (tr.t > T + 1.2) tr.finish();
+  const period = (2 * HH) / CC;
+  const move = beta * CC * t;
+  const gStr = g.toFixed(2);
+  // Right: the lab frame. Clock B (blue) is still. Clock A (orange) goes by at speed beta. The time of A is t / gamma.
+  const tauA = t / g, tauB = t;
+  // Left: the frame of A. Clock A is still. Clock B goes by the other way. The time of B is t / gamma.
+  const views = [
+    { pen: pens[0], still: { label: 'Clock A, at rest here', col: C.ink, tau: t, ticks: Math.floor(t / period) }, mov: { label: 'Clock B, moving', col: C.ball, tau: t / g, ticks: Math.floor(t / g / period) }, dir: -1 },
+    { pen: pens[1], still: { label: 'Clock B, at rest here', col: C.ball, tau: t, ticks: Math.floor(t / period) }, mov: { label: 'Clock A, moving', col: C.ink, tau: t / g, ticks: Math.floor(t / g / period) }, dir: 1 },
+  ];
+  for (const v of views) {
+    const p = v.pen.begin().box(-6.2, 6.2, -1.6, 5.1, 8);
+    const x0 = v.dir > 0 ? -4.5 : 4.5;
+    // The clock at rest: stands at the start.
+    clockRow(p, x0, 0, v.still.tau, v.still.label, v.still.col, false, beta, v.still.ticks);
+    // The path of the moving clock's pulse: a zigzag.
+    const y = 3.2, x = x0 + v.dir * move;
+    const path = [];
+    for (let s = 0; s <= t + 1e-9; s += 0.02) {
+      const ph = ((s / g) % period) / period, h = ph < 0.5 ? ph * 2 : 2 - ph * 2;
+      path.push({ x: x0 + v.dir * beta * CC * s, y: y + h * HH });
+    }
+    p.line(path, v.mov.col === C.ink ? 'rgba(255,162,74,0.55)' : 'rgba(79,195,247,0.55)', 2);
+    clockRow(p, x, y, v.mov.tau, v.mov.label, v.mov.col, true, beta, v.mov.ticks);
+    p.arrow({ x: x, y: y - 0.9 }, { x: v.dir * 1.0, y: 0 }, '#fff', 2, `${beta.toFixed(2)} c`);
+    p.note(`The moving clock has made ${v.mov.ticks} tick${v.mov.ticks === 1 ? '' : 's'}. The one at rest has made ${v.still.ticks}.`);
+  }
+  const lpath = (2 * HH) * g;
+  app.explain(`${nums([['γ (the stretch of time)', gStr], ['light path per tick, at rest', `${(2 * HH).toFixed(1)}`], ['light path per tick, moving', `${lpath.toFixed(1)}`], ['moving clock ticks', `${(100 / g).toFixed(0)}%`, 'as often']])}
+    <p>Each clock is a pulse of light bouncing between two mirrors. One bounce is one tick. In its own frame, the pulse goes straight up and down. Seen from a frame where the clock <b>moves</b>, the mirrors slide sideways while the pulse is in flight, so the pulse travels a longer, slanted path. But light has the <b>same speed for everyone</b>. A longer path at the same speed takes more time, so each tick takes longer: the moving clock runs slow, by the factor γ = 1 / √(1 − v²/c²).</p>
+    <p>Both pictures are correct, and they are mirror images. In each frame the <b>other</b> clock is the slow one. There is no contradiction as long as the clocks are only compared when they meet, and they do not meet again unless one turns around. It is real: fast muons made in the upper air live long enough to reach the ground, and the clocks on GPS satellites must be corrected.</p>`);
+}
+
+// ---------- Train and lightning ----------
+
+function bolt(p, pt, col, size = 0.45) {
+  p.line([{ x: pt.x + 0.1 * size, y: pt.y + size }, { x: pt.x - 0.2 * size, y: pt.y + 0.2 * size }, { x: pt.x + 0.2 * size, y: pt.y + 0.15 * size }, { x: pt.x - 0.1 * size, y: pt.y - 0.5 * size }], col, 3.5);
+}
+function drawTrain() {
+  const { beta } = ui.v, g = gam(beta), A = 2, v = beta * CC;
+  const T = Math.min(9.5, A / (CC * (1 - beta)) + 0.9);
+  const sim = Math.min(tr.t, T);
+  if (tr.t > T + 1.5) tr.finish();
+  const flag = (ctx) => ctx;
+  // Platform frame: strikes are at the same time, t = 0, at the two ends of the train.
+  const t = sim - 0.5;
+  const L = pens[0].begin().box(-7, 13, -2, 4.4, 10);
+  L.line([{ x: -7, y: 0 }, { x: 13, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  const cx = v * t;
+  L.rect(cx - A, 0.15, cx + A, 1.25, { fill: 'rgba(240,98,146,0.2)', stroke: C.friend, width: 2.5 });
+  L.dot({ x: cx, y: 0.7 }, C.friend, 6); L.text('train rider', { x: cx, y: 1.25 }, { dy: -12, size: 11, color: C.friend });
+  L.dot({ x: 0, y: -0.7 }, C.you, 6); L.text('platform observer', { x: 0, y: -0.7 }, { dy: 16, size: 11, color: C.you });
+  const rings = [{ x: -A, y: 0.7, t0: 0 }, { x: A, y: 0.7, t0: 0 }];
+  rings.forEach((r) => { if (t >= r.t0) { L.circle(r, CC * (t - r.t0), { stroke: `rgba(255,213,79,${Math.max(0.12, 0.6 - CC * (t - r.t0) * 0.05)})`, width: 2 }); } if (t >= r.t0 && t < r.t0 + 0.35) bolt(L, r, '#ffd54f'); });
+  // Arrivals.
+  const arrP = A / CC, arrFront = A / (CC * (1 + beta)), arrRear = A / (CC * (1 - beta));
+  const flash = (pen, x, y, tt, t0, col) => { if (tt >= t0 && tt < t0 + 0.4) pen.circle({ x, y }, 0.25 + (tt - t0) * 0.6, { stroke: col, width: 3 }); };
+  flash(L, 0, -0.7, t, arrP, C.you);
+  flash(L, cx, 0.7, t, arrFront, C.friend); flash(L, cx, 0.7, t, arrRear, C.friend);
+  const status = [`${t >= arrP ? 'Both flashes have reached the platform observer at the same moment: the strikes were at the same time.' : 'The light is on its way.'}`];
+  L.note(`Strikes are at the same moment (t = 0), at the two ends of the train`);
+
+  // Train frame: the train is still and longer. The platform goes by. The strikes are not at the same time.
+  const tp0 = -g * beta * A / CC - 0.5;
+  const tt = tp0 + sim;
+  const R = pens[1].begin().box(-9, 11, -2, 4.4, 10);
+  const px = (x) => x;
+  const off = (-v * tt) % 1;
+  R.line([{ x: -9, y: 0 }, { x: 11, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  for (let x = -10 + (off < 0 ? off + 1 : off); x < 11; x += 1) R.line([{ x, y: 0 }, { x: x - 0.12, y: -0.14 }], 'rgba(155,231,166,0.4)', 1.2);
+  R.rect(-g * A, 0.15, g * A, 1.25, { fill: 'rgba(240,98,146,0.2)', stroke: C.friend, width: 2.5 });
+  R.dot({ x: 0, y: 0.7 }, C.friend, 6); R.text('train rider', { x: 0, y: 1.25 }, { dy: -12, size: 11, color: C.friend });
+  const pObs = { x: -v * tt, y: -0.7 };
+  R.dot(pObs, C.you, 6); R.text('platform observer', pObs, { dy: 16, size: 11, color: C.you });
+  const rings2 = [{ x: g * A, y: 0.7, t0: -g * beta * A / CC }, { x: -g * A, y: 0.7, t0: g * beta * A / CC }];
+  rings2.forEach((r) => { if (tt >= r.t0) R.circle(r, CC * (tt - r.t0), { stroke: `rgba(255,213,79,${Math.max(0.12, 0.6 - CC * (tt - r.t0) * 0.05)})`, width: 2 }); if (tt >= r.t0 && tt < r.t0 + 0.35) bolt(R, r, '#ffd54f'); });
+  const tFront = g * A * (1 - beta) / CC, tRear = g * A * (1 + beta) / CC;
+  flash(R, 0, 0.7, tt, tFront, C.friend); flash(R, 0, 0.7, tt, tRear, C.friend);
+  flash(R, pObs.x, -0.7, tt, g * A / CC, C.you);
+  R.note(`Here the front is struck first, then the rear, ${(2 * g * beta * A / CC).toFixed(2)} s later`);
+
+  const rider = t < arrFront ? '' : t < arrRear ? 'The train rider has seen the front flash, and not yet the rear.' : 'The train rider has seen both: front first, then rear.';
+  app.explain(`${nums([['strikes, in the platform frame', 'at the same time'], ['strikes, in the train frame', `${(2 * g * beta * A / CC).toFixed(2)} s apart`], ['train length, platform / train', `${(2 * A).toFixed(1)} / ${(2 * g * A).toFixed(1)}`]])}
+    <p>Lightning strikes both ends of a moving train at the same moment, as judged on the platform. The observer on the platform, halfway between the strikes, sees the two flashes arrive together, and says: the strikes were simultaneous. The rider is at the middle of the train. The train moves toward the front flash and away from the rear one, so the rider sees the <b>front flash first</b>. ${rider}</p>
+    <p>Now take the rider's view (right). The rider is at rest, halfway between the ends. Light goes at the same speed both ways, and the flashes reach the rider at different times, so the strikes cannot have been at the same time: the front one came <b>first</b>. Each is right in their own frame. Whether two separated events are simultaneous <b>depends on who is looking</b>. The same effect makes moving objects shorter in the direction they move: the train is shorter on the platform's measure than on its own.</p>`);
+}
+
+// ---------- Spacetime diagram ----------
+
+const ev = (k) => (k === 'A' ? { x: ui.v.ax, t: ui.v.at } : { x: ui.v.bx, t: ui.v.bt });
+const boost = (e, b) => { const g = gam(b); return { x: g * (e.x - b * e.t), t: g * (e.t - b * e.x) }; };
+const unboost = (e, b) => { const g = gam(b); return { x: g * (e.x + b * e.t), t: g * (e.t + b * e.x) }; };
+let drag = null;
+function stFrame(pen, b, other, label, ghostAxes) {
+  // The pen shows a frame in which the events have coordinates `e`. Its own axes are at right angles. The other frame's
+  // axes are drawn tilted: the time axis of the other frame leans toward x by b, and its space axis leans toward t.
+  const P = pen.begin().box(-4.2, 4.2, -4.2, 4.2, 22);
+  for (let k = -4; k <= 4; k++) { P.line([{ x: k, y: -4 }, { x: k, y: 4 }], 'rgba(255,255,255,0.06)', 1); P.line([{ x: -4, y: k }, { x: 4, y: k }], 'rgba(255,255,255,0.06)', 1); }
+  P.line([{ x: -4, y: -4 }, { x: 4, y: 4 }], 'rgba(255,213,79,0.45)', 1.5, [6, 5]); P.line([{ x: -4, y: 4 }, { x: 4, y: -4 }], 'rgba(255,213,79,0.45)', 1.5, [6, 5]);
+  P.text('light', { x: 3.7, y: 3.9 }, { size: 10.5, color: 'rgba(255,213,79,0.8)' });
+  P.line([{ x: -4, y: 0 }, { x: 4, y: 0 }], 'rgba(255,255,255,0.5)', 1.6); P.line([{ x: 0, y: -4 }, { x: 0, y: 4 }], 'rgba(255,255,255,0.5)', 1.6);
+  P.text('space', { x: 4, y: 0 }, { dx: -20, dy: -10, size: 11, color: 'rgba(255,255,255,0.7)' }); P.text('time', { x: 0, y: 4 }, { dx: 22, dy: 4, size: 11, color: 'rgba(255,255,255,0.7)' });
+  // The other frame's axes and a grid of them.
+  const u = other; // the other frame moves at velocity u relative to this one
+  const g = gam(u);
+  const tAxis = { x: u, y: 1 }, xAxis = { x: 1, y: u };
+  for (let k = -5; k <= 5; k++) {
+    P.line([V.add(V.mul(xAxis, -6), V.mul(tAxis, k * g * 0.6 * 0 + k)), V.add(V.mul(xAxis, 6), V.mul(tAxis, k))].map((q) => ({ x: q.x, y: q.y })), 'rgba(79,195,247,0.12)', 1);
+  }
+  P.line([V.mul(tAxis, -6), V.mul(tAxis, 6)], C.ball, 2.4); P.line([V.mul(xAxis, -6), V.mul(xAxis, 6)], C.ball, 2.4);
+  P.text(ghostAxes[1], V.mul(xAxis, 3.5), { dx: -30, dy: 14, size: 11, color: C.ball });
+  P.text(ghostAxes[0], V.mul(tAxis, 3.6), { dx: -48, size: 11, color: C.ball });
+  for (let s = 1; s <= 3; s++) { P.dot({ x: g * u * s, y: g * s }, C.ball, 3); P.dot({ x: g * s, y: g * u * s }, C.ball, 3); }
+  return P;
+}
+function drawST() {
+  const b = ui.v.sb;
+  const A = ev('A'), B = ev('B');
+  const a2 = boost(A, b), b2 = boost(B, b);
+  const pa = pens[0], pb = pens[1];
+  const P1 = stFrame(pa, b, b, '', ['time (2nd frame)', 'space (2nd frame)']);
+  const P2 = stFrame(pb, -b, -b, '', ['time (1st frame)', 'space (1st frame)']);
+  const draw = (P, o, a, bb) => {
+    P.dot({ x: 0, y: 0 }, '#fff', 7); P.text('O', { x: 0, y: 0 }, { dx: 10, dy: 12, size: 11.5 });
+    const qa = { x: a.x, y: a.t }, qb = { x: bb.x, y: bb.t };
+    P.line([{ x: 0, y: 0 }, qa], 'rgba(255,162,74,0.4)', 1.4, [3, 4]); P.line([{ x: 0, y: 0 }, qb], 'rgba(240,98,146,0.4)', 1.4, [3, 4]);
+    P.dot(qa, C.ink, 8); P.text('A', qa, { dx: 12, dy: -10, size: 12, color: C.ink });
+    P.dot(qb, C.friend, 8); P.text('B', qb, { dx: 12, dy: -10, size: 12, color: C.friend });
+  };
+  draw(P1, 0, A, B); draw(P2, 0, a2, b2);
+  P1.note('Blue: the axes of the second frame', P1.ch - 22); P2.note('Same events, new coordinates', P2.ch - 22);
+  const iv = (e) => e.t * e.t - e.x * e.x;
+  const kind = (e) => (Math.abs(iv(e)) < 0.02 ? 'on a light ray' : iv(e) > 0 ? 'timelike: cause and effect possible' : 'spacelike: no cause and effect');
+  const order = (e) => (Math.abs(e.t) < 0.03 ? 'at the same time as O' : e.t > 0 ? 'after O' : 'before O');
+  app.explain(`${nums([['A, in the first frame', `x = ${A.x.toFixed(2)}, t = ${A.t.toFixed(2)}`], ['A, in the second', `x = ${a2.x.toFixed(2)}, t = ${a2.t.toFixed(2)}`], ['A and O are', Math.abs(iv(A)) < 0.02 ? 'on a light ray' : iv(A) > 0 ? 'timelike' : 'spacelike'], ['t² − x² is the same in both', iv(A).toFixed(2)]])}
+    <p>Each picture is a map of events, with space across and time up (light covers one unit of space in one unit of time, so light rays are at 45°). The events A and B, and O at the middle, are the <b>same events</b> in both pictures. A frame that moves is a different set of axes: its time axis leans toward its direction of travel, and its space axis leans up by the same angle. That lean is what moves the coordinates around.</p>
+    <p>A is <b>${order(A)}</b> in the first frame and <b>${order(a2)}</b> in the second. ${iv(A) < -0.02 ? 'A is far enough from O in space, and close enough in time, that no light could carry a signal between them (spacelike). That is why different frames disagree on which came first. Drag A and change the speed to see the order change.' : iv(A) > 0.02 ? 'A is inside the light cone of O: a signal could go from O to A (timelike). All frames agree on the order. Only the times and the distances change.' : 'A is on a light ray from O. All frames agree it is on the ray.'} The quantity <b>t² − x²</b> does not change from frame to frame. The distance and the time between two events do change, but together they keep this combination.</p>`);
+}
+const stHit = (pen, P, evs, w) => {
+  let best = null, bd = 0.5;
+  for (const [k, p] of evs) { const d = Math.hypot(p.x - w.x, p.y - w.y); if (d < bd) { bd = d; best = k; } }
+  return best;
+};
+function stPointers() {
+  const inFrame = (b) => (w) => b ? unboost({ x: w.x, t: w.y }, ui.v.sb) : { x: w.x, t: w.y };
+  for (const [pen, second] of [[pens[0], false], [pens[1], true]]) {
+    pen.pointer({
+      down(w) {
+        if (ui.v.mode !== 'st') return;
+        const A = ev('A'), B = ev('B'), a2 = boost(A, ui.v.sb), b2 = boost(B, ui.v.sb);
+        const list = second ? [['A', { x: a2.x, y: a2.t }], ['B', { x: b2.x, y: b2.t }]] : [['A', { x: A.x, y: A.t }], ['B', { x: B.x, y: B.t }]];
+        drag = stHit(pen, null, list, w);
+      },
+      move(w) {
+        if (!drag) return;
+        const e = second ? unboost({ x: w.x, t: w.y }, ui.v.sb) : { x: w.x, t: w.y };
+        const cl = (v) => Math.max(-3.9, Math.min(3.9, v));
+        if (drag === 'A') { ui.set('ax', cl(e.x), true); ui.set('at', cl(e.t), true); } else { ui.set('bx', cl(e.x), true); ui.set('bt', cl(e.t), true); }
+      },
+      up() { drag = null; },
+    });
+  }
+}
+stPointers();
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'clock') drawClock(); else if (m === 'train') drawTrain(); else drawST();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

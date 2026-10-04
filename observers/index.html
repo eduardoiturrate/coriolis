@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Moving observers · Spin</title>
+<meta name="description" content="Rain on a moving person: should you run? The Doppler effect of a passing siren. The way the stars crowd ahead of a very fast spaceship." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'observers',
+  sub: 'What you see depends on how you move. Rain, sound and light all look different to a moving observer, in ways you can calculate.',
+  views: [{ caption: '' }, { caption: '' }, { caption: '', span: 2, short: true }],
+  rows: 'minmax(0, 1fr) minmax(0, 0.55fr)',
+  go: 'Start', speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['rain', 'Rain'], ['doppler', 'Doppler effect'], ['aber', 'Stars ahead']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('v', { label: 'Your speed', min: 0.5, max: 8, step: 0.1, value: 2, fmt: (v) => `${v.toFixed(1)} m/s${v < 2.5 ? ' (a walk)' : v > 5 ? ' (a sprint)' : ' (a run)'}`, show: is('rain') });
+ui.slider('u', { label: 'Speed the rain falls at', min: 2, max: 9, step: 0.5, value: 6, fmt: (v) => `${v} m/s`, show: is('rain') });
+ui.slider('w', { label: 'Wind: behind you (+) or in your face (−)', min: -6, max: 6, step: 0.5, value: 0, fmt: (v) => `${v > 0 ? '+' : ''}${v} m/s`, show: is('rain') });
+ui.slider('m', { label: 'Speed of the siren, against the speed of sound', min: 0, max: 2, step: 0.02, value: 0.5, fmt: (v) => `${v.toFixed(2)}${v >= 1 ? ' (faster than sound)' : ''}`, show: is('doppler') });
+ui.chips([{ text: 'A car 0.1', set: { m: 0.1 } }, { text: 'Fast 0.5', set: { m: 0.5 } }, { text: 'Mach 1', set: { m: 1 } }, { text: 'Jet 1.5', set: { m: 1.5 } }], { show: is('doppler') });
+ui.check('sound', 'Sound: hear what the listener hears', false, { show: is('doppler') });
+ui.slider('beta', { label: 'Speed of the spaceship, against light', min: 0, max: 0.99, step: 0.01, value: 0.8, fmt: (v) => `${v.toFixed(2)} c`, show: is('aber') });
+ui.chips([{ text: '0.5', set: { beta: 0.5 } }, { text: '0.8', set: { beta: 0.8 } }, { text: '0.95', set: { beta: 0.95 } }, { text: '0.99', set: { beta: 0.99 } }], { show: is('aber') });
+ui.seg('law', [['light', 'Light (relativity)'], ['rain', 'Rain-like (old physics)']], { label: 'How the direction changes', show: is('aber') });
+
+const tone = Spin.tone();
+ui.on((id) => {
+  if (id === 'mode') setup();
+  if (id === 'sound') { if (ui.v.sound) tone.on(); else tone.off(); return; }
+  tr.restart();
+});
+function setup() {
+  const m = ui.v.mode;
+  const still = m === 'aber';
+  tr.go.hidden = still; tr.pauseBtn.hidden = still; tr.loopBox.parentElement.hidden = still; tr.speedBox.parentElement.hidden = still;
+  tr.setGo(m === 'rain' ? 'Walk across' : 'Start');
+  if (m === 'doppler') tone.off();
+  if (m === 'rain') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.55fr)'); app.caption(0, 'In the frame of the ground'); app.caption(1, 'In your frame'); app.caption(2, 'Water you collect on a 20 m crossing, for each speed'); }
+  else if (m === 'doppler') { app.show(2, 2); app.layout(2, 'minmax(0, 1fr)'); app.caption(0, 'Sound waves from the moving siren'); app.caption(1, 'Pitch the listener hears'); }
+  else { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.5fr)'); app.caption(0, 'The sky as seen at rest, looking ahead'); app.caption(1, 'The same sky seen from the ship'); app.caption(2, 'Where a star at one angle seems to be'); }
+}
+
+// ---------- Rain ----------
+
+const RHO = 0.25, A_TOP = 0.1, A_SIDE = 0.7, DIST = 20; // grams of water in a cubic meter of rain, and the areas (m²) of the head and shoulders and of the front
+const drops = (() => { const r = Spin.rng(7), o = []; for (let i = 0; i < 160; i++) o.push({ x: (r() - 0.5) * 30, y: r() * 11 }); return o; })();
+let rainLast = performance.now();
+function drawRain(now) {
+  const { v, u, w } = ui.v;
+  const dt = Math.min(0.05, (now - rainLast) / 1000) * tr.speed; rainLast = now;
+  const T = DIST / v;
+  const t = Math.min(tr.t, T);
+  if (tr.t > T + 0.8) tr.finish();
+  const px = -DIST / 2 + v * t;
+  for (const d of drops) { d.x += w * dt; d.y -= u * dt; if (d.y < 0) { d.y += 11; d.x = px + (Math.random() - 0.5) * 30 + (Math.random() - 0.5) * 0; } if (d.x > 16) d.x -= 30; if (d.x < -16) d.x += 30; }
+  const person = (p, x, col) => {
+    p.rect(x - 0.22, 0, x + 0.22, 1.7, { fill: 'rgba(240,98,146,0.4)', stroke: col, width: 2.2 });
+    p.circle({ x, y: 1.95 }, 0.18, { fill: 'rgba(240,98,146,0.5)', stroke: col, width: 2 });
+  };
+  // The ground's view.
+  const L = pens[0].begin().box(-11, 11, -1, 8, 8);
+  L.line([{ x: -11, y: 0 }, { x: 11, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  for (const d of drops) if (Math.abs(d.x) < 11 && d.y < 8) L.line([{ x: d.x, y: d.y }, { x: d.x - w * 0.045, y: d.y + u * 0.045 }], 'rgba(120,190,255,0.7)', 1.6);
+  person(L, px, C.friend);
+  L.arrow({ x: px, y: 2.7 }, { x: v * 0.35, y: 0 }, C.you, 3, `${v.toFixed(1)} m/s`);
+  L.note('The rain falls (blown by the wind) and you walk across it');
+  // Your view: you stand still, and the ground and the rain go by.
+  const R = pens[1].begin().box(-11, 11, -1, 8, 8);
+  const off = (-v * t) % 1;
+  R.line([{ x: -11, y: 0 }, { x: 11, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  for (let x = -12 + (off < 0 ? off + 1 : off); x < 11; x += 1) R.line([{ x, y: 0 }, { x: x - 0.12, y: -0.14 }], 'rgba(155,231,166,0.4)', 1.2);
+  for (const d of drops) { const rx = d.x - px; if (Math.abs(rx) < 11 && d.y < 8) R.line([{ x: rx, y: d.y }, { x: rx - (w - v) * 0.045, y: d.y + u * 0.045 }], 'rgba(120,190,255,0.7)', 1.6); }
+  person(R, 0, C.friend);
+  R.arrow({ x: 1.6, y: 3.2 }, { x: (w - v) * 0.3, y: -u * 0.3 }, 'rgba(120,190,255,0.9)', 3, 'rain, as you meet it');
+  R.note('You stand still. The rain comes at a slant, toward your front');
+
+  // The water collected.
+  const rate = { top: RHO * u * A_TOP, front: RHO * A_SIDE * Math.max(0, v - w), back: RHO * A_SIDE * Math.max(0, w - v) };
+  const got = { top: rate.top * t, front: rate.front * t, back: rate.back * t };
+  const total = (v2) => (RHO * DIST * (A_TOP * u + A_SIDE * Math.abs(v2 - w))) / v2;
+  const q = pens[2].begin();
+  const ymax = Math.max(total(0.5), 4) * 1.05;
+  const xmax = Math.max(8, 8);
+  const ch = q.chart({ x: 4, y: 2, w: q.cw * 0.62, h: q.ch - 6 }, { x0: 0.5, x1: xmax, y0: 0, y1: Math.min(ymax, 40), title: 'Water caught (grams) against your speed (m/s)', xTicks: 8, yTicks: 4, fmtY: (a) => a.toFixed(0), xTitle: 'your speed (m/s)' });
+  const tot = [], top = [], side = [];
+  for (let s = 0.5; s <= xmax + 1e-9; s += 0.05) { tot.push({ x: s, y: total(s) }); top.push({ x: s, y: (RHO * DIST * A_TOP * u) / s }); side.push({ x: s, y: (RHO * DIST * A_SIDE * Math.abs(s - w)) / s }); }
+  ch.line(top, 'rgba(255,162,74,0.6)', 2); ch.line(side, 'rgba(79,195,247,0.6)', 2); ch.line(tot, '#fff', 3);
+  ch.dot(v, total(v), C.ink, 6);
+  ch.text('head and shoulders', 7.9, (RHO * DIST * A_TOP * u) / 7.9, { align: 'right', dy: -10, size: 10.5, color: 'rgba(255,162,74,0.9)' });
+  ch.text('front (or back)', 7.9, (RHO * DIST * A_SIDE * Math.abs(7.9 - w)) / 7.9, { align: 'right', dy: 14, size: 10.5, color: 'rgba(79,195,247,0.9)' });
+  // The meter so far.
+  const bx = q.cw * 0.66, bw = q.cw * 0.3;
+  const mx = Math.max(total(v), 1);
+  [['head and shoulders', got.top, C.ink], ['front', got.front, C.ball], ['back', got.back, C.friend]].forEach(([n, val, col], i) => {
+    const y = 26 + i * 40;
+    q.textS(`${n}: ${val.toFixed(1)} g`, bx, y, { align: 'left', size: 12, color: col, base: 'bottom' });
+    const ctx = q.ctx, px2 = (a) => q.px(a);
+    ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(px2(bx), px2(y + 4), px2(bw), px2(10));
+    ctx.fillStyle = col; ctx.fillRect(px2(bx), px2(y + 4), px2(bw * Math.min(1, val / mx)), px2(10));
+  });
+  q.textS(`${(got.top + got.front + got.back).toFixed(1)} g so far, of ${total(v).toFixed(1)} g in all`, bx, 26 + 3 * 40 - 8, { align: 'left', size: 12.5, color: '#fff', base: 'bottom' });
+  const best = w > 0 && w < 8 ? w : 8;
+  app.explain(`${nums([['time to cross', `${T.toFixed(1)}`, 's'], ['water caught in all', `${total(v).toFixed(1)}`, 'g'], ['walking at 1 m/s would catch', `${total(1).toFixed(1)}`, 'g'], ['running at 8 m/s would catch', `${total(8).toFixed(1)}`, 'g']])}
+    <p>On the ground (left), the rain falls and you walk across it. In your own frame (right), you are still, and the rain comes toward you at a slant. Count the water in two parts. Your <b>head and shoulders</b> catch rain for as long as you are out in it, so the longer you take, the wetter they get: this part is proportional to 1 / speed. Your <b>front</b> catches the rain that you walk into. That depends only on <b>the distance</b>, however fast you go: it is as if you swept through a fixed amount of rain.</p>
+    <p>So, with the rain falling straight down, <b>run</b>: the front is the same either way, and the head gets less. With wind behind you, the front gets less rain, since the rain is already going your way. If the wind equals your speed, your front stays dry, and you are best off ${w > 0 ? `keeping to about ${w} m/s: that is the lowest point of the white curve` : 'running as fast as you can'}. With the wind in your face, running still helps, and by more. Try it.</p>`);
+}
+
+// ---------- Doppler ----------
+
+const CS = 5; // the speed of sound in the picture, units a second
+const PER = 0.55; // the time between waves from the siren
+function drawDoppler(now) {
+  const { m } = ui.v;
+  const vs = m * CS;
+  const t = tr.t;
+  const x0 = -9, xEnd = 9;
+  const dur = m > 0.01 ? (xEnd - x0) / vs : 12;
+  const tEnd = Math.min(dur, 40);
+  if (tr.t > tEnd + 0.5) tr.finish();
+  const tt = Math.min(t, tEnd);
+  const pos = (te) => ({ x: x0 + vs * te, y: 0 });
+  const p = pens[0].begin().box(-10.5, 10.5, -5.2, 5.2, 8);
+  const n = Math.floor(tt / PER);
+  for (let k = Math.max(0, n - 40); k <= n; k++) {
+    const te = k * PER, r = CS * (tt - te), c = pos(te);
+    const a = Math.max(0.1, 0.8 - r * 0.045);
+    p.circle(c, r, { stroke: `rgba(120,190,255,${a})`, width: 1.8 });
+  }
+  if (m > 1) { // the cone
+    const s = pos(tt), ang = Math.asin(1 / m);
+    p.line([s, V.add(s, V.polar(14, Math.PI - ang))], 'rgba(255,162,74,0.9)', 2.5); p.line([s, V.add(s, V.polar(14, Math.PI + ang))], 'rgba(255,162,74,0.9)', 2.5);
+  }
+  p.line([{ x: -10.5, y: 0 }, { x: 10.5, y: 0 }], 'rgba(255,255,255,0.1)', 1, [4, 6]);
+  p.circle(pos(tt), 0.22, { fill: C.ink, stroke: '#fff', width: 2 });
+  p.arrow(pos(tt), { x: 1.4, y: 0 }, C.ink, 2.5);
+  p.dot({ x: 0, y: -3.6 }, C.you, 7); p.text('listener', { x: 0, y: -3.6 }, { dy: 18, size: 11.5, color: C.you });
+  p.dot({ x: 8.8, y: 2.4 }, C.you, 5); p.text('ahead', { x: 8.8, y: 2.4 }, { dy: -12, size: 11, color: C.you });
+  p.dot({ x: -8.8, y: 2.4 }, C.you, 5); p.text('behind', { x: -8.8, y: 2.4 }, { dy: -12, size: 11, color: C.you });
+  p.note(m > 1 ? 'Faster than its own sound: the waves pile into a cone' : m === 0 ? 'A siren standing still: round waves' : 'Waves crowd together ahead, and spread out behind');
+
+  const q = pens[1].begin();
+  const d = 3.6;
+  let note = '';
+  if (m < 1) {
+    // The pitch of what reaches the listener at (0, -d), against the time of arrival.
+    const f = (te) => { const sx = x0 + vs * te, r = Math.hypot(sx, d), cosPsi = -sx / r; return 1 / (1 - m * cosPsi); };
+    const arr = (te) => te + Math.hypot(x0 + vs * te, d) / CS;
+    const pts = []; for (let te = 0; te <= dur; te += dur / 300) pts.push({ x: arr(te), y: f(te) });
+    const t0 = pts[0].x, t1 = pts[pts.length - 1].x;
+    const fmin = 1 / (1 + m), fmax = 1 / (1 - m);
+    const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: t0, x1: t1, y0: Math.max(0, fmin * 0.9), y1: fmax * 1.1, title: 'Pitch the listener hears, against the true pitch', xTicks: 6, yTicks: 5, fmtX: (v) => v.toFixed(0), fmtY: (v) => v.toFixed(2), xTitle: 'time (s)' });
+    ch.hline(1, 'rgba(255,255,255,0.35)'); ch.text('the true pitch', t0 + 0.2, 1, { dy: -9, size: 10.5, color: 'rgba(255,255,255,0.6)' });
+    ch.line(pts, 'rgba(79,195,247,0.35)', 2);
+    // The time of arrival is t. Find what emission time arrives now.
+    let lo = 0, hi = dur;
+    for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (arr(mid) < t0 + tt) lo = mid; else hi = mid; }
+    const cur = f(lo);
+    ch.line(pts.filter((o) => o.x <= t0 + tt), C.ball, 3.2); ch.dot(t0 + tt, cur, C.ink, 6.5);
+    if (ui.v.sound) tone.set(300 * cur, tr.running ? 0.08 : 0); else tone.off();
+    note = `${nums([['pitch ahead of the siren', `${fmax.toFixed(2)}×`], ['pitch behind it', `${fmin.toFixed(2)}×`], ['pitch now, at the listener', `${cur.toFixed(2)}×`]])}`;
+  } else {
+    q.textS('A siren faster than its sound reaches the listener', q.cw / 2, q.ch / 2 - 22, { size: 14 });
+    q.textS('after it has passed, and all at once: a boom.', q.cw / 2, q.ch / 2 + 2, { size: 14 });
+    q.textS(`The cone has half-angle ${(Math.asin(1 / m) / DEG).toFixed(0)}° (the sine of it is 1 / ${m.toFixed(2)}).`, q.cw / 2, q.ch / 2 + 32, { size: 12.5, color: 'rgba(255,255,255,0.7)' });
+    tone.off();
+    note = `${nums([['cone half-angle', `${(Math.asin(1 / m) / DEG).toFixed(0)}°`]])}`;
+  }
+  app.explain(`${note}
+    <p>Each wave leaves the siren at the place where the siren was <b>at that moment</b>, and then spreads out in a circle at the speed of sound, whatever the siren does next. A moving siren leaves a trail of circles, each centered farther along. Ahead of it the circles are crowded, so the waves reach you more often: a <b>higher pitch</b>. Behind, they are spread out, a <b>lower pitch</b>. A listener beside the path hears the pitch fall as the siren passes: the familiar drop in the note of a passing ambulance. Moving toward a still source gives a similar but not identical change.</p>
+    <p>The pitch ahead is f / (1 − v/c), and behind it f / (1 + v/c). At the speed of sound the circles pile up in front, and beyond it they form a cone: a <b>shock wave</b>, which you hear as a boom, because the sound from all the points along the path arrives together. The Doppler shift of light works the same way, and it is how astronomers measure the speed of stars and of galaxies.</p>`);
+}
+
+// ---------- Stars ahead ----------
+
+const stars = (() => {
+  const r = Spin.rng(21), o = [];
+  for (let i = 0; i < 900; i++) { const z = 2 * r() - 1, a = TAU * r(), s = Math.sqrt(1 - z * z); o.push({ th: Math.acos(z), az: a, mag: 0.25 + 0.75 * r() ** 2.5 }); }
+  return o;
+})();
+function aberr(th, b, law) {
+  const c = Math.cos(th), s = Math.sin(th);
+  if (law === 'light') return Math.acos(Math.max(-1, Math.min(1, (c + b) / (1 + b * c))));
+  return Math.atan2(s, c + b);
+}
+function drawAber() {
+  const { beta, law } = ui.v;
+  const g = 1 / Math.sqrt(1 - beta * beta);
+  const sky = (pen, mapth) => {
+    const p = pen.begin().box(-1.1, 1.1, -1.1, 1.1, 8);
+    p.circle({ x: 0, y: 0 }, 1, { fill: '#04070d', stroke: 'rgba(255,255,255,0.4)', width: 2 });
+    for (const a of [30, 60, 90, 120, 150]) p.circle({ x: 0, y: 0 }, a / 180, { stroke: 'rgba(255,255,255,0.1)', width: 1 });
+    for (let k = 0; k < 12; k++) p.line([{ x: 0, y: 0 }, V.polar(1, (k * TAU) / 12)], 'rgba(255,255,255,0.06)', 1);
+    p.text('ahead', { x: 0, y: 0 }, { dy: -8, size: 10.5, color: 'rgba(255,255,255,0.5)' });
+    p.text('behind', { x: 1, y: 0 }, { dx: -26, dy: 12, size: 10.5, color: 'rgba(255,255,255,0.4)' });
+    for (const s of stars) {
+      const th2 = mapth(s.th), r = th2 / Math.PI;
+      const pos = V.polar(r, s.az);
+      let col = 255, bl = 255, rr = 255, gg = 255, a = 0.4 + 0.6 * s.mag, rad = 0.8 + 1.6 * s.mag;
+      if (pen === pens[1]) {
+        const dop = 1 / (g * (1 - beta * Math.cos(th2)));
+        const sh = Math.max(-1, Math.min(1, Math.log(dop) * 0.9));
+        if (law === 'light') { rr = 255 - 90 * Math.max(0, sh); bl = 255 - 110 * Math.max(0, -sh); gg = 255 - 40 * Math.abs(sh); a = Math.min(1, a * (0.5 + 0.5 * dop * dop * 0.5)); rad *= 0.8 + 0.4 * Math.min(2.5, dop); }
+      }
+      p.dot(pos, `rgba(${Math.round(rr)},${Math.round(gg)},${Math.round(bl)},${Math.min(1, Math.max(0.05, a))})`, rad);
+    }
+    return p;
+  };
+  const A = sky(pens[0], (th) => th); A.note('At rest: stars are spread evenly over the whole sky');
+  const B = sky(pens[1], (th) => aberr(th, beta, law)); B.note(law === 'light' ? 'Moving: the stars crowd toward the front' : 'With old physics: they would crowd too, but less');
+  const q = pens[2].begin();
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: 180, y0: 0, y1: 180, title: 'Angle you see, against the angle at rest (degrees from straight ahead)', xTicks: 6, yTicks: 6, xTitle: 'angle at rest (°)' });
+  const lin = [{ x: 0, y: 0 }, { x: 180, y: 180 }]; ch.line(lin, 'rgba(255,255,255,0.3)', 1.5, [4, 4]);
+  const a = [], b = []; for (let d = 0; d <= 180; d += 1) { a.push({ x: d, y: aberr(d * DEG, beta, 'light') / DEG }); b.push({ x: d, y: aberr(d * DEG, beta, 'rain') / DEG }); }
+  ch.line(b, law === 'rain' ? C.ink : 'rgba(255,162,74,0.35)', law === 'rain' ? 3 : 2); ch.line(a, law === 'light' ? C.ball : 'rgba(79,195,247,0.35)', law === 'light' ? 3 : 2);
+  ch.text('light', 150, aberr(150 * DEG, beta, 'light') / DEG, { dy: -10, size: 10.5, color: C.ball }); ch.text('rain-like', 120, aberr(120 * DEG, beta, 'rain') / DEG, { dy: 14, size: 10.5, color: C.ink });
+  const doppler = Math.sqrt((1 + beta) / (1 - beta));
+  const front = (1 + beta) / 2; // the same for both rules: a star that is 90 degrees from the front is at cos = -beta
+  app.explain(`${nums([['seen in the front half of the sky', `${(front * 100).toFixed(0)}%`, 'of the stars'], ['straight ahead is blue-shifted by', `${doppler.toFixed(2)}×`], ['γ', g.toFixed(2)]])}
+    <p>The left sky is what a still observer sees: stars evenly spread, shown as a disc with the forward direction at the middle and the backward direction at the rim. The right sky is the same stars seen from a ship moving forward at high speed. The direction in which you see a star changes: it moves toward the front. This is <b>aberration</b>. It has an everyday analogue: in the rain mode, a person walking forward sees the rain come from ahead. Light does the same, but with a different rule, because the speed of light is the same for every observer: it bends the view toward the front more strongly (compare the two curves). Both rules agree on which stars end up 90° from the front.</p>
+    <p>At 0.8 c, 90% of all the stars crowd into the front half of the view, and there is a dark hole behind. Stars ahead are also <b>blue-shifted</b> and brighter (the colors on the right), those behind are red and dim. This is the “star-field” of science-fiction films, and also how the Earth's own motion shifts the position of stars by a small angle every year: the first proof that Earth moves.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'rain') drawRain(now); else if (m === 'doppler') drawDoppler(now); else drawAber();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fourier circles · Spin</title>
+<meta name="description" content="Circles that turn on circles add up to a wave or to a drawing. Build a square wave from sines, or draw a shape and watch circles redraw it." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'fourier',
+  sub: 'Any repeating shape can be built from circles, each turning at a whole-number multiple of one basic rate.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', loop: true, speed: { min: 0.1, max: 2, value: 0.8, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['wave', 'Build a wave'], ['draw', 'Draw with circles']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.pick('kind', [['square', 'Square wave'], ['saw', 'Sawtooth'], ['tri', 'Triangle wave']], { label: 'The wave', show: is('wave'), cols: 2 });
+ui.slider('n', { label: 'Number of circles', min: 1, max: 40, step: 1, value: 5, fmt: (v) => String(v), show: is('wave') });
+ui.chips([{ text: '1', set: { n: 1 } }, { text: '3', set: { n: 3 } }, { text: '10', set: { n: 10 } }, { text: '40', set: { n: 40 } }], { show: is('wave') });
+ui.pick('shape', [['heart', 'Heart'], ['star', 'Star'], ['eight', 'Figure eight'], ['trefoil', 'Trefoil'], ['free', 'Draw your own']], { label: 'The picture', show: is('draw'), cols: 2 });
+ui.slider('k', { label: 'Number of circles', min: 1, max: 100, step: 1, value: 20, fmt: (v) => String(v), show: is('draw') });
+ui.chips([{ text: '2', set: { k: 2 } }, { text: '5', set: { k: 5 } }, { text: '20', set: { k: 20 } }, { text: '100', set: { k: 100 } }], { show: is('draw') });
+ui.hint('Choose “Draw your own”, then draw a closed shape in the left view with the mouse or a finger.', { show: (v) => v.mode === 'draw' && v.shape === 'free' });
+
+ui.on((id) => { if (id === 'mode') setup(); if (id === 'shape' || id === 'mode') prepareShape(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  app.caption(0, m === 'wave' ? 'Circles on circles' : 'Circles that draw the picture');
+  app.caption(1, m === 'wave' ? 'The sum of the circles, and its parts' : 'The picture the circles make, and how big each circle is');
+}
+
+// ---------- Waves ----------
+
+function terms(kind, count) {
+  const out = [];
+  for (let n = 1; out.length < count && n < 400; n++) {
+    let a = 0;
+    if (kind === 'square' && n % 2) a = 4 / (Math.PI * n);
+    else if (kind === 'saw') a = ((2 / Math.PI) * (n % 2 ? 1 : -1)) / n;
+    else if (kind === 'tri' && n % 2) a = ((8 / (Math.PI * Math.PI)) * (((n - 1) / 2) % 2 ? -1 : 1)) / (n * n);
+    if (a) out.push({ n, a });
+  }
+  return out;
+}
+const target = (kind, t) => {
+  const u = ((t + Math.PI) % TAU + TAU) % TAU - Math.PI;
+  return kind === 'square' ? (u > 0 ? 1 : -1) : kind === 'saw' ? u / Math.PI : (2 / Math.PI) * Math.asin(Math.sin(u));
+};
+const sumAt = (tm, t) => tm.reduce((s, q) => s + q.a * Math.sin(q.n * t), 0);
+
+function drawWave(now) {
+  const t = tr.t * 1.2;
+  const tm = terms(ui.v.kind, ui.v.n);
+  const L = pens[0].begin().box(-3.9, 6.6, -2.1, 2.1, 8);
+  let c = { x: -2.3, y: 0 };
+  const start = c;
+  for (const q of tm) {
+    const th = q.n * t + (q.a < 0 ? Math.PI : 0), r = Math.abs(q.a);
+    const nx = V.add(c, V.polar(r, th));
+    L.circle(c, r, { stroke: 'rgba(255,255,255,0.22)', width: 1.2 });
+    L.line([c, nx], 'rgba(255,255,255,0.55)', 1.8);
+    c = nx;
+  }
+  L.dot(start, 'rgba(255,255,255,0.4)', 3);
+  L.line([{ x: c.x, y: c.y }, { x: 0.3, y: c.y }], 'rgba(255,255,255,0.35)', 1.2, [4, 4]);
+  L.dot(c, C.ink, 6);
+  const trace = []; for (let s = 0; s <= 6.9; s += 0.04) trace.push({ x: 0.3 + s * 0.9, y: sumAt(tm, t - s) });
+  L.line([{ x: 0.3, y: 0 }, { x: 6.5, y: 0 }], 'rgba(255,255,255,0.12)', 1, [4, 5]);
+  L.line(trace, C.ink, 3.2);
+  L.dot({ x: 0.3, y: c.y }, C.ink, 5);
+  L.note(`${tm.length} circle${tm.length > 1 ? 's' : ''}: the height of the last point draws the wave`);
+
+  const q = pens[1].begin();
+  const hh = q.ch * 0.58 - 4;
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: hh }, { x0: -Math.PI, x1: Math.PI, y0: -1.4, y1: 1.4, title: 'The wave (grey) and the sum of the circles (orange)', xTicks: 6, yTicks: 4, fmtX: (v) => `${(v / Math.PI).toFixed(1)}π`, padB: 20 });
+  const tg = [], sm = []; for (let x = -Math.PI; x <= Math.PI + 1e-9; x += 0.02) { tg.push({ x, y: target(ui.v.kind, x) }); sm.push({ x, y: sumAt(tm, x) }); }
+  ch.line(tg, 'rgba(255,255,255,0.4)', 2, [5, 4]);
+  ch.line(sm, C.ink, 2.6);
+  const all = terms(ui.v.kind, 40);
+  const c2 = q.chart({ x: 4, y: hh + 8, w: q.cw - 8, h: q.ch - hh - 12 }, { x0: 0, x1: 41, y0: 0, y1: Math.max(...all.map((z) => Math.abs(z.a))) * 1.1, title: 'Size of each circle, by how fast it turns', xTicks: 8, yTicks: 3, fmtY: (v) => v.toFixed(1), padB: 20 });
+  c2.bars(all.map((z) => ({ x: z.n, y: Math.abs(z.a), color: tm.some((m) => m.n === z.n) ? C.ink : 'rgba(255,255,255,0.18)' })), 0.7);
+  const gibbs = ui.v.kind === 'square' && ui.v.n >= 5;
+  app.explain(`${nums([['circles', String(tm.length)], ['biggest circle', Math.abs(tm[0].a).toFixed(2)], ['turn rates', tm.slice(0, 5).map((z) => z.n).join(', ') + (tm.length > 5 ? ', …' : '')]])}
+    <p>Each circle turns at a whole-number multiple of the first one's rate, and each is smaller than the one before. The last point rides on the circle, which rides on the circle before it, and so on. We only look at its <b>height</b>, and plot that against time. With more circles, the curve gets closer to the wave we wanted.</p>
+    <p>${ui.v.kind === 'square' ? 'A square wave has sharp corners, so it needs many small, fast circles: the sizes fall only as 1/n. ' : ui.v.kind === 'saw' ? 'A sawtooth has a jump, so its circles shrink slowly, as 1/n. ' : 'A triangle wave has only corners, no jumps, so its circles shrink quickly, as 1/n². A few are enough. '}${gibbs ? 'Near each jump of the square wave the sum overshoots by about 9%, however many circles you add. This is the Gibbs effect.' : ''}</p>`);
+}
+
+// ---------- Drawing ----------
+
+const SHAPES = {
+  heart: (s) => ({ x: 16 * Math.sin(s) ** 3, y: 13 * Math.cos(s) - 5 * Math.cos(2 * s) - 2 * Math.cos(3 * s) - Math.cos(4 * s) }),
+  eight: (s) => ({ x: Math.sin(s), y: Math.sin(s) * Math.cos(s) }),
+  trefoil: (s) => ({ x: Math.sin(s) + 2 * Math.sin(2 * s), y: Math.cos(s) - 2 * Math.cos(2 * s) }),
+};
+function starPoints() {
+  const v = []; for (let i = 0; i < 10; i++) v.push(V.polar(i % 2 ? 0.42 : 1, Math.PI / 2 + (i * TAU) / 10));
+  return v;
+}
+/** Resample a closed path to m points spaced evenly along its length. */
+function resample(pts, m) {
+  const p = pts.concat([pts[0]]);
+  const lens = [0]; for (let i = 1; i < p.length; i++) lens.push(lens[i - 1] + V.len(V.sub(p[i], p[i - 1])));
+  const total = lens[lens.length - 1] || 1, out = [];
+  let j = 1;
+  for (let i = 0; i < m; i++) {
+    const d = (i / m) * total;
+    while (j < p.length - 1 && lens[j] < d) j++;
+    const f = (d - lens[j - 1]) / ((lens[j] - lens[j - 1]) || 1);
+    out.push(V.add(p[j - 1], V.mul(V.sub(p[j], p[j - 1]), f)));
+  }
+  return out;
+}
+let shapePts = null, coef = [], drawing = null;
+function normalise(pts) {
+  const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
+  const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const sc = 1.6 / Math.max((Math.max(...xs) - Math.min(...xs)) / 2, (Math.max(...ys) - Math.min(...ys)) / 2, 1e-6);
+  return pts.map((q) => ({ x: (q.x - cx) * sc, y: (q.y - cy) * sc }));
+}
+function dft(zs) {
+  const M = zs.length, out = [];
+  for (let k = -M / 2; k < M / 2; k++) {
+    let re = 0, im = 0;
+    for (let j = 0; j < M; j++) { const a = (-TAU * k * j) / M; re += zs[j].x * Math.cos(a) - zs[j].y * Math.sin(a); im += zs[j].x * Math.sin(a) + zs[j].y * Math.cos(a); }
+    out.push({ k, re: re / M, im: im / M, amp: Math.hypot(re, im) / M });
+  }
+  return out.sort((a, b) => b.amp - a.amp);
+}
+function prepareShape() {
+  if (ui.v.mode !== 'draw') return;
+  let raw = null;
+  const s = ui.v.shape;
+  if (s === 'star') raw = starPoints();
+  else if (s === 'free') raw = drawing && drawing.length > 8 ? drawing : null;
+  else { raw = []; for (let i = 0; i < 400; i++) raw.push(SHAPES[s]((i / 400) * TAU)); }
+  if (!raw) { shapePts = null; coef = []; return; }
+  shapePts = normalise(resample(raw, 256));
+  coef = dft(shapePts);
+}
+const epiAt = (k, s) => {
+  // The first term is the middle of the picture. The others turn at k times the basic rate.
+  let x = 0, y = 0;
+  for (let i = 0; i < Math.min(k + 1, coef.length); i++) {
+    const c = coef[i], a = TAU * c.k * s, co = Math.cos(a), si = Math.sin(a);
+    x += c.re * co - c.im * si; y += c.re * si + c.im * co;
+  }
+  return { x, y };
+};
+
+function drawDraw(now) {
+  const K = ui.v.k, T = 10;
+  const L = pens[0].begin().box(-2.1, 2.1, -2.1, 2.1, 10);
+  if (!shapePts) {
+    L.note(drawing && drawing.length ? 'Keep drawing, then let go' : 'Draw a closed shape here with the mouse or a finger');
+    if (drawing && drawing.length > 1) L.line(drawing, C.you, 3);
+    pens[1].begin().note('Nothing drawn yet');
+    app.explain('<p>Draw any closed shape in the left view. It is turned into a list of points, and then into circles: one circle for each basic rate, each with its own size and starting angle. Start the circles turning and they redraw your picture.</p>');
+    return;
+  }
+  const s = ((tr.t / T) % 1);
+  L.line(shapePts.concat([shapePts[0]]), 'rgba(255,255,255,0.18)', 1.5, [4, 5]);
+  let cpos = { x: 0, y: 0 };
+  for (let i = 0; i < Math.min(K + 1, coef.length); i++) {
+    const c = coef[i], a = TAU * c.k * s, nx = { x: cpos.x + c.re * Math.cos(a) - c.im * Math.sin(a), y: cpos.y + c.re * Math.sin(a) + c.im * Math.cos(a) };
+    if (i > 0) { L.circle(cpos, c.amp, { stroke: 'rgba(255,255,255,0.2)', width: 1 }); L.line([cpos, nx], 'rgba(255,255,255,0.5)', 1.4); }
+    cpos = nx;
+  }
+  const trace = []; const n = Math.max(2, Math.floor(s * 600));
+  for (let i = 0; i <= n; i++) trace.push(epiAt(K, (i / 600)));
+  L.line(trace, C.ink, 3.2);
+  L.dot(cpos, C.ink, 6);
+  L.note(`${Math.min(K, coef.length - 1)} circles`);
+
+  const q = pens[1].begin();
+  const hh = q.ch * 0.62 - 4;
+  const R = q.box(-2.1, 2.1, -2.1, 2.1, 10, { x: 0, y: 0, w: q.cw, h: hh });
+  R.line(shapePts.concat([shapePts[0]]), 'rgba(255,255,255,0.3)', 1.6, [4, 5]);
+  const full = []; for (let i = 0; i <= 500; i++) full.push(epiAt(K, i / 500));
+  R.line(full, C.ink, 3);
+  R.note('The picture from the circles (orange), against the original (dashed)');
+  const top = coef.slice(1, 41);
+  const ch = q.chart({ x: 4, y: hh + 6, w: q.cw - 8, h: q.ch - hh - 10 }, { x0: 0, x1: 41, y0: 0, y1: (top[0] ? top[0].amp : 1) * 1.1, title: 'Size of each circle, largest first', xTicks: 8, yTicks: 3, fmtY: (v) => v.toFixed(2), padB: 20 });
+  ch.bars(top.map((c, i) => ({ x: i + 1, y: c.amp, color: i < K ? C.ink : 'rgba(255,255,255,0.18)' })), 0.7);
+  let err = 0; for (let i = 0; i < 128; i++) { const e = epiAt(K, i / 128), p = shapePts[Math.floor((i / 128) * shapePts.length)]; err += Math.hypot(e.x - p.x, e.y - p.y); }
+  app.explain(`${nums([['circles used', String(Math.min(K, coef.length - 1))], ['of', String(coef.length - 1)], ['typical miss', `${((err / 128) / 1.6 * 100).toFixed(1)}%`, 'of the picture’s size']])}
+    <p>Every closed curve can be built by adding circles that turn at whole-number rates (some forward, some backward). The biggest circles give the rough shape, and the small ones add the corners and details. A heart or a figure eight is smooth, so a few circles are enough. A star has sharp points, so it needs many small circles to get the corners right.</p>
+    <p>This is the Fourier series, in two dimensions. It is how many sound, image and signal tools work: they keep the big circles, and drop the small ones that no one can see or hear.</p>`);
+}
+
+pens[0].pointer({
+  down(w) { if (ui.v.mode === 'draw' && ui.v.shape === 'free') { drawing = [w]; shapePts = null; coef = []; } },
+  move(w) { if (drawing && ui.v.mode === 'draw' && ui.v.shape === 'free') drawing.push(w); },
+  up() { if (drawing && drawing.length > 8) { prepareShape(); tr.restart(); } },
+});
+
+function draw(now) {
+  tr.step(now);
+  if (ui.v.mode === 'wave') drawWave(now); else drawDraw(now);
+}
+setup(); prepareShape(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

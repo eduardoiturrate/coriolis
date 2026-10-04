@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gravity assist · Spin</title>
+<meta name="description" content="A probe passing a moving planet can gain or lose speed. Seen from the planet, the speed is the same going in and coming out. Seen from the Sun, it is not." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+// Units: the planet is like Jupiter. The unit of length is 143,000 km (two planet radii), and the unit of speed is 29.8 km/s.
+const US = 29.8, PR = 0.5;
+
+const app = Spin.app({
+  slug: 'slingshot',
+  sub: 'The planet pulls the probe in and lets it go again. Nothing is gained from the pull itself. The gain comes from the planet moving.',
+  views: [{ caption: 'Seen from the Sun: the planet moves' }, { caption: 'Seen from the planet: it stands still' }, { caption: 'Speed of the probe, in each view', span: 2, short: true }],
+  rows: 'minmax(0, 1fr) minmax(0, 0.55fr)',
+  go: 'Send the probe', speed: { min: 0.2, max: 4, value: 1, step: 0.1 },
+});
+const { ui, tr, pens } = app;
+
+ui.slider('vp', { label: 'Speed of the planet around the Sun', min: 0, max: 30, step: 0.5, value: 13, fmt: (v) => `${v} km/s` });
+ui.slider('vinf', { label: 'Speed of the probe toward the planet, as the planet sees it', min: 3, max: 30, step: 0.5, value: 12, fmt: (v) => `${v} km/s` });
+ui.slider('b', { label: 'Where it passes: behind (+) or in front (−) of the planet', min: -40, max: 40, step: 1, value: 14, fmt: (v) => `${v > 0 ? '+' : ''}${v} planet radii`, hint: 'Behind: the probe goes through the planet’s wake. In front: it crosses the planet’s path first.' });
+ui.chips([{ text: 'Behind: gains speed', set: { b: 14 } }, { text: 'In front: loses speed', set: { b: -14 } }, { text: 'Close behind', set: { b: 8 } }, { text: 'Far behind', set: { b: 35 } }]);
+ui.check('vec', 'Show the speeds as arrows', true);
+app.credit('The planet is like Jupiter. Only the pull of the planet is used. The pull of the Sun is left out, as it changes little during the pass.');
+
+ui.on(() => { sim = null; tr.restart(); });
+
+let sim = null;
+function simulate() {
+  const vp = ui.v.vp / US, vinf = ui.v.vinf / US, b = ui.v.b * PR;
+  const D0 = Math.max(16, Math.abs(b) * 1.5 + 8);
+  const v0 = Math.sqrt(vinf * vinf + 2 / D0), x0 = (b * vinf) / v0, rStart = Math.hypot(x0, D0); // so that vinf and b are the true values far away
+  let y = [x0, -D0, 0, v0], t = 0, crash = false;
+  const pts = [], f = (s) => { const r3 = Math.hypot(s[0], s[1]) ** 3; return [s[2], s[3], -s[0] / r3, -s[1] / r3]; };
+  let rmin = Infinity;
+  while (t < 400) {
+    const r = Math.hypot(y[0], y[1]);
+    rmin = Math.min(rmin, r);
+    const rel = { x: y[0], y: y[1] }, vrel = { x: y[2], y: y[3] };
+    pts.push({ t, rel, vrel, planet: { x: -vp * t, y: 0 }, sun: { x: rel.x - vp * t, y: rel.y }, vsun: { x: vrel.x - vp, y: vrel.y } });
+    if (r < PR) { crash = true; break; }
+    if (t > 5 && r >= rStart && y[1] > 0) break;
+    const h = Math.min(0.02, 0.004 * Math.max(r, 0.6));
+    y = Spin.rk4(f, y, 0, h); t += h;
+  }
+  const a = pts[0], z = pts[pts.length - 1];
+  const sp = (q) => Math.hypot(q.vsun.x, q.vsun.y), sr = (q) => Math.hypot(q.vrel.x, q.vrel.y);
+  const defl = Math.acos(Math.max(-1, Math.min(1, (a.vrel.x * z.vrel.x + a.vrel.y * z.vrel.y) / (sr(a) * sr(z)))));
+  return { pts, vp, vinf, b, crash, rmin, in_: sp(a), out: sp(z), inRel: sr(a), outRel: sr(z), defl, key: `${ui.v.vp}|${ui.v.vinf}|${ui.v.b}` };
+}
+
+function draw(now) {
+  tr.step(now);
+  if (!sim || sim.key !== `${ui.v.vp}|${ui.v.vinf}|${ui.v.b}`) sim = simulate();
+  const s = sim, T = tr.t * 4;
+  const end = s.pts[s.pts.length - 1].t;
+  if (tr.running && T > end + 3) tr.finish();
+  const upto = s.pts.filter((q) => q.t <= T);
+  const cur = upto.length ? upto[upto.length - 1] : s.pts[0];
+  const arrowK = 1.3 / Math.max(s.vinf, s.vp, 0.2);
+
+  // The Sun's view.
+  const xs = s.pts.map((q) => q.sun.x), ys = s.pts.map((q) => q.sun.y), pxs = s.pts.map((q) => q.planet.x);
+  const x0 = Math.min(...xs, ...pxs) - 1.5, x1 = Math.max(...xs, ...pxs) + 1.5, y0 = Math.min(...ys) - 1.5, y1 = Math.max(...ys) + 1.5;
+  const L = pens[0].begin().box(x0, x1, y0, y1, 12);
+  L.line([{ x: pxs[0], y: 0 }, { x: pxs[pxs.length - 1], y: 0 }], 'rgba(255,255,255,0.15)', 1.2, [4, 6]);
+  L.line(s.pts.map((q) => q.sun), 'rgba(255,255,255,0.18)', 1.4, [4, 5]);
+  L.line(upto.map((q) => q.sun), C.ink, 3);
+  L.circle(cur.planet, PR, { fill: 'rgba(201,140,90,0.55)', stroke: '#d9a066', width: 2 });
+  L.text('planet', cur.planet, { dy: 24, size: 11, color: '#d9a066' });
+  L.dot(cur.sun, '#fff', 5.5);
+  if (ui.v.vec) {
+    L.arrow(cur.planet, { x: -s.vp * arrowK * 1.0, y: 0 }, '#d9a066', 2.6, 'planet');
+    L.arrow(cur.sun, V.mul(cur.vsun, arrowK), C.ink, 3, 'probe');
+  }
+  L.note(s.crash ? 'The probe hit the planet' : 'The path bends, and the probe’s speed changes');
+
+  // The planet's view.
+  const rx = s.pts.map((q) => q.rel.x), ry = s.pts.map((q) => q.rel.y);
+  const e = Math.max(...rx.map(Math.abs), 2.5) * 1.15, ey = Math.max(...ry.map(Math.abs), 2.5) * 1.05;
+  const R = pens[1].begin().box(-e, e, -ey, ey, 12);
+  R.circle({ x: 0, y: 0 }, PR, { fill: 'rgba(201,140,90,0.55)', stroke: '#d9a066', width: 2 });
+  R.line(s.pts.map((q) => q.rel), 'rgba(255,255,255,0.18)', 1.4, [4, 5]);
+  R.line(upto.map((q) => q.rel), C.ball, 3);
+  R.dot(cur.rel, '#fff', 5.5);
+  if (ui.v.vec) R.arrow(cur.rel, V.mul(cur.vrel, arrowK), C.ball, 3, 'probe');
+  R.arrow({ x: -e * 0.8, y: ey * 0.8 }, { x: s.vp * arrowK, y: 0 }, '#d9a066', 2.6, 'the Sun moves this way');
+  const z = s.pts[s.pts.length - 1];
+  R.note(`Turned by ${(s.defl / DEG).toFixed(0)}°. The speed going out equals the speed coming in.`);
+
+  // The chart.
+  const q = pens[2].begin();
+  const smax = Math.max(...s.pts.map((p) => Math.hypot(p.vsun.x, p.vsun.y)), s.vinf, 0.1) * US * 1.12;
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: end, y0: 0, y1: smax, title: 'Speed (km/s) against time: in the Sun’s view (orange) and in the planet’s view (blue)', xTicks: 8, yTicks: 4, fmtX: () => '', padB: 12 });
+  const dec = Math.max(1, Math.floor(s.pts.length / 400));
+  const pick = (arr) => arr.filter((_, i) => i % dec === 0);
+  ch.line(pick(s.pts).map((p) => ({ x: p.t, y: Math.hypot(p.vsun.x, p.vsun.y) * US })), 'rgba(255,162,74,0.3)', 2);
+  ch.line(pick(s.pts).map((p) => ({ x: p.t, y: Math.hypot(p.vrel.x, p.vrel.y) * US })), 'rgba(79,195,247,0.3)', 2);
+  ch.line(pick(upto).map((p) => ({ x: p.t, y: Math.hypot(p.vsun.x, p.vsun.y) * US })), C.ink, 3);
+  ch.line(pick(upto).map((p) => ({ x: p.t, y: Math.hypot(p.vrel.x, p.vrel.y) * US })), C.ball, 3);
+  ch.vline(cur.t);
+
+  const gain = (s.out - s.in_) * US;
+  app.explain(`${nums([['speed in the Sun’s view, before and after', `${(s.in_ * US).toFixed(1)} → ${(s.out * US).toFixed(1)}`, 'km/s'], ['change', `${gain >= 0 ? '+' : ''}${gain.toFixed(1)}`, 'km/s'], ['in the planet’s view, before and after', `${(s.inRel * US).toFixed(1)} → ${(s.outRel * US).toFixed(1)}`, 'km/s'], ['turned by', `${(s.defl / DEG).toFixed(0)}°`]])}
+    <p>Look from the <b>planet</b> (right). It stands still. The probe falls in, swings round the planet, and leaves. The planet's pull is the same on the way in as on the way out, so the speed going out is exactly the speed coming in. Only the <b>direction</b> has changed. Nothing was gained.</p>
+    <p>Now look from the <b>Sun</b> (left). The planet is moving. The turn rotates the probe's velocity <i>relative to the planet</i>, and then the planet's own velocity is added back. If the turn points the probe more nearly the way the planet moves (passing <b>behind</b> it), it leaves faster. If it points the probe against the planet's motion (passing <b>in front</b>), it leaves slower. The energy comes from the planet, which slows by an amount far too small to notice. Voyager 2 used four planets this way. Probes going to the Sun do the reverse, to slow down.</p>`);
+}
+tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

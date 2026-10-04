@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Orbits · Spin</title>
+<meta name="description" content="Kepler's laws with an orbit you can change, a cannonball fired from a mountain, and an orbit that slowly turns because the pull is not exactly an inverse square." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'orbits',
+  sub: 'An orbit is a fall that keeps missing the ground. The path is set by the speed and the direction at the start.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', loop: true, speed: { min: 0.2, max: 6, value: 1, step: 0.1 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['kepler', 'Kepler’s laws'], ['launch', 'Newton’s cannon'], ['turn', 'A turning orbit']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('a', { label: 'Size of the orbit (the long half-axis)', min: 0.3, max: 10, log: true, value: 1, fmt: (v) => `${v} AU`, show: is('kepler') });
+ui.slider('e', { label: 'How stretched it is (eccentricity)', min: 0, max: 0.9, step: 0.01, value: 0.5, fmt: (v) => v.toFixed(2), show: (v) => v.mode === 'kepler' });
+ui.slider('v', { label: 'Speed of the shot, against the speed of a circular orbit', min: 0.2, max: 1.6, step: 0.01, value: 0.8, fmt: (v) => v.toFixed(2), show: is('launch') });
+ui.chips([{ text: 'Falls back 0.5', set: { v: 0.5 } }, { text: 'Ellipse 0.85', set: { v: 0.85 } }, { text: 'Circle 1.0', set: { v: 1 } }, { text: 'Long ellipse 1.3', set: { v: 1.3 } }, { text: 'Escape 1.42', set: { v: 1.42 } }], { show: is('launch') });
+ui.slider('ecc', { label: 'How stretched the orbit is', min: 0.1, max: 0.85, step: 0.01, value: 0.6, fmt: (v) => v.toFixed(2), show: is('turn') });
+ui.slider('prec', { label: 'Turn of the orbit in each trip (drawn much too large)', min: 1, max: 60, step: 1, value: 20, fmt: (v) => `${v}°`, show: is('turn') });
+
+ui.on((id) => { if (id === 'mode') setup(); resetAll(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo('Restart');
+  const caps = { kepler: ['A planet around the Sun', 'Speed against time, and period against size'], launch: ['A cannon on a very high mountain (not to scale)', 'The energy of the shot'], turn: ['An orbit with a little extra pull', 'Which way the nearest point faces'] }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+
+// ---------- Kepler ----------
+
+function solveE(M, e) {
+  let E = M + e * Math.sin(M);
+  for (let i = 0; i < 40; i++) { const d = (E - e * Math.sin(E) - M) / (1 - e * Math.cos(E)); E -= d; if (Math.abs(d) < 1e-12) break; }
+  return E;
+}
+const PLANETS = [['Mercury', 0.387, 0.241], ['Venus', 0.723, 0.615], ['Earth', 1, 1], ['Mars', 1.524, 1.881], ['Jupiter', 5.203, 11.86], ['Saturn', 9.537, 29.46]];
+function kepler(a, e, tYears) {
+  const T = a ** 1.5, M = ((TAU * tYears) / T) % TAU;
+  const E = solveE(M, e), b = a * Math.sqrt(1 - e * e);
+  const p = { x: a * (Math.cos(E) - e), y: b * Math.sin(E) };
+  const r = a * (1 - e * Math.cos(E));
+  return { p, r, T, v: 29.78 * Math.sqrt(2 / r - 1 / a) };
+}
+function drawKepler() {
+  const { a, e } = ui.v;
+  const T = a ** 1.5, yr = tr.t / 3;
+  const now = kepler(a, e, yr);
+  const rmax = a * (1 + e) * 1.15;
+  const L = pens[0].begin().box(-rmax, rmax, -rmax, rmax, 10);
+  L.c = { x: -a * e * 0.5, y: 0 };
+  const orb = []; for (let k = 0; k <= 240; k++) orb.push(kepler(a, e, (k / 240) * T).p);
+  L.line(orb, 'rgba(255,255,255,0.25)', 1.5);
+  const wedge = (t0, t1, fill) => { const pts = [{ x: 0, y: 0 }]; for (let k = 0; k <= 24; k++) pts.push(kepler(a, e, t0 + ((t1 - t0) * k) / 24).p); L.poly(pts, { fill }); };
+  for (let k = 0; k < 12; k++) wedge((k * T) / 12, ((k + 1) * T) / 12, k % 2 ? 'rgba(79,195,247,0.10)' : 'rgba(79,195,247,0.2)');
+  const dt = T / 12;
+  wedge(yr - dt, yr, 'rgba(255,162,74,0.45)');
+  L.circle({ x: 0, y: 0 }, rmax * 0.035, { fill: '#ffd54f', stroke: '#fff', width: 1.5 });
+  const tail = []; for (let k = 0; k <= 30; k++) tail.push(kepler(a, e, yr - (dt * 0.6 * (30 - k)) / 30).p);
+  L.line(tail, C.ink, 3);
+  L.dot(now.p, C.ink, 7);
+  const vel = V.sub(kepler(a, e, yr + 0.002 * T).p, kepler(a, e, yr - 0.002 * T).p);
+  L.arrow(now.p, V.mul(V.norm(vel), rmax * 0.18), C.you, 3, `${now.v.toFixed(0)} km/s`);
+  L.note('Equal times sweep equal areas (every wedge has the same area)');
+
+  const q = pens[1].begin();
+  const hh = q.ch * 0.5 - 6;
+  const c1 = q.chart({ x: 4, y: 2, w: q.cw - 8, h: hh }, { x0: 0, x1: T, y0: 0, y1: 29.78 * Math.sqrt(2 / (a * (1 - e)) - 1 / a) * 1.1, title: 'Speed (km/s) against time (years)', xTicks: 5, yTicks: 4, fmtX: (v) => +v.toPrecision(2), padB: 22 });
+  const sp = []; for (let k = 0; k <= 200; k++) sp.push({ x: (k / 200) * T, y: kepler(a, e, (k / 200) * T).v });
+  c1.line(sp, C.ball, 2.8); c1.dot((yr % T), now.v, C.ink, 6);
+  const c2 = q.chart({ x: 4, y: hh + 8, w: q.cw - 8, h: q.ch - hh - 12 }, { x0: -0.6, x1: 1.1, y0: -0.8, y1: 1.8, title: 'Period against size, both in log form: a straight line', xTicks: 4, yTicks: 4, fmtX: (v) => +(10 ** v).toPrecision(2), fmtY: (v) => +(10 ** v).toPrecision(2), xTitle: 'size of orbit (AU)' });
+  c2.line([{ x: -0.6, y: -0.9 }, { x: 1.1, y: 1.65 }], 'rgba(255,255,255,0.3)', 1.5);
+  PLANETS.forEach(([n, pa, pt]) => { c2.dot(Math.log10(pa), Math.log10(pt), '#aeb9c8', 4.5); c2.text(n, Math.log10(pa), Math.log10(pt), { dx: 6, dy: -9, size: 10, color: '#aeb9c8' }); });
+  c2.dot(Math.log10(a), Math.log10(T), C.ink, 7);
+  app.explain(`${nums([['period', `${T < 1 ? (T * 365.25).toFixed(0) + ' days' : T.toFixed(2) + ' years'}`], ['nearest and farthest', `${(a * (1 - e)).toFixed(2)} to ${(a * (1 + e)).toFixed(2)}`, 'AU'], ['fastest and slowest', `${(29.78 * Math.sqrt(2 / (a * (1 - e)) - 1 / a)).toFixed(0)} and ${(29.78 * Math.sqrt(2 / (a * (1 + e)) - 1 / a)).toFixed(0)}`, 'km/s']])}
+    <p><b>First law:</b> a planet moves on an ellipse with the Sun at one focus. <b>Second law:</b> the line from the Sun to the planet sweeps out equal areas in equal times. The wedges show it: near the Sun the planet is fast and the wedge is short and wide; far away it is slow and the wedge is long and thin. This is conservation of angular momentum. <b>Third law:</b> the square of the period is proportional to the cube of the size, so on the log chart all the planets lie on one straight line, with the slope 3/2.</p>`);
+}
+
+// ---------- Newton's cannon ----------
+
+const H0 = 0.05;
+let shot = null;
+function makeShot() {
+  const v0 = ui.v.v / Math.sqrt(1 + H0), r0 = 1 + H0;
+  const f = (y) => { const r3 = Math.hypot(y[0], y[1]) ** 3; return [y[2], y[3], -y[0] / r3, -y[1] / r3]; };
+  let y = [0, r0, v0, 0], t = 0, hit = false;
+  const pts = [{ t: 0, p: { x: 0, y: r0 } }];
+  while (t < 22 && !hit) {
+    y = Spin.rk4(f, y, t, 0.01); t += 0.01;
+    if (Math.hypot(y[0], y[1]) <= 1) { hit = true; }
+    pts.push({ t, p: { x: y[0], y: y[1] } });
+    if (Math.hypot(y[0], y[1]) > 12) break;
+  }
+  const E = 0.5 * v0 * v0 - 1 / r0, h = r0 * v0;
+  let kind;
+  if (E >= -1e-9) kind = 'escapes: the energy is zero or more';
+  else {
+    const a = -1 / (2 * E), e = Math.sqrt(Math.max(0, 1 - (h * h) / a));
+    kind = a * (1 - e) < 1 ? 'falls back to the ground' : e < 0.02 ? 'a circular orbit' : 'an ellipse: it orbits';
+    shot = null;
+    return { pts, hit, E, h, kind, a, e, v0, r0 };
+  }
+  return { pts, hit, E, h, kind, v0, r0 };
+}
+function drawLaunch() {
+  const key = ui.v.v;
+  if (!shot || shot.key !== key) { shot = makeShot(); shot.key = key; }
+  const s = shot;
+  const t = tr.t;
+  const last = s.pts[s.pts.length - 1];
+  if (t > last.t + 0.8) tr.finish();
+  const upto = s.pts.filter((q) => q.t <= t);
+  const cur = upto.length ? upto[upto.length - 1].p : s.pts[0].p;
+  const ext = Math.min(4, Math.max(1.7, Math.max(...s.pts.map((q) => Math.hypot(q.p.x, q.p.y))) * 1.12));
+  const L = pens[0].begin().box(-ext, ext, -ext, ext, 8);
+  L.circle({ x: 0, y: 0 }, 1, { fill: '#14365e', stroke: '#c9d3df', width: 2.5 });
+  L.circle({ x: 0, y: 0 }, 1.03, { stroke: 'rgba(120,190,255,0.3)', width: 3 });
+  L.line(s.pts.map((q) => q.p), 'rgba(255,255,255,0.18)', 1.5, [4, 5]);
+  L.line(upto.map((q) => q.p), C.ink, 3.2);
+  L.line([{ x: 0, y: 1 }, { x: 0, y: 1 + H0 }], '#9aa5b5', 6);
+  L.dot({ x: 0, y: 1 + H0 }, '#fff', 4);
+  L.dot(cur, C.ink, 7);
+  if (s.hit && t >= last.t) L.text('×', cur, { size: 22, color: C.warn, weight: 800 });
+  L.text('cannon', { x: 0.1, y: 1 + H0 }, { dx: 8, dy: -10, size: 11, align: 'left', color: 'rgba(255,255,255,0.7)' });
+  L.note(s.kind[0].toUpperCase() + s.kind.slice(1));
+
+  const q = pens[1].begin();
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 1, x1: 6, y0: -1.1, y1: 0.4, title: 'Energy: the well Earth makes (grey), and the shot’s total energy (orange)', xTicks: 5, yTicks: 5, fmtY: (v) => v.toFixed(1), xTitle: 'distance from the center (Earth radii)' });
+  const well = []; for (let r = 1; r <= 6; r += 0.02) well.push({ x: r, y: -1 / r });
+  ch.area(well, 'rgba(79,195,247,0.15)', -1.1);
+  ch.line(well, '#aeb9c8', 2.5);
+  ch.hline(0, 'rgba(255,255,255,0.4)', [2, 4]); ch.text('zero: free of Earth', 5.9, 0, { align: 'right', dy: -9, size: 10.5, color: 'rgba(255,255,255,0.55)' });
+  ch.line([{ x: 1, y: s.E }, { x: 6, y: s.E }], C.ink, 3);
+  const rc = Math.hypot(cur.x, cur.y);
+  if (rc <= 6) { ch.dot(rc, -1 / rc, '#fff', 5.5); ch.line([{ x: rc, y: -1 / rc }, { x: rc, y: s.E }], 'rgba(255,255,255,0.5)', 1.5, [3, 3]); }
+  const vc = 7.905, ve = vc * Math.SQRT2;
+  app.explain(`${nums([['speed of a circular orbit at the surface', '7.9', 'km/s'], ['speed to leave Earth', '11.2', 'km/s'], ['this shot', `${(ui.v.v * vc / Math.sqrt(1 + H0)).toFixed(1)}`, 'km/s'], ['result', s.kind]])}
+    <p>Newton imagined a cannon on a mountain so high that the air does not matter. Fired slowly, the ball falls to the ground, on a curve. Faster, and it lands farther away. Fast enough, and the ground curves away as fast as the ball falls: it <b>never lands</b>. That is an orbit. At 7.9 km/s the path is a circle. A bit faster, and it is an ellipse, with the cannon at its nearest point. At 11.2 km/s (√2 times as fast) the path is a parabola and it never comes back.</p>
+    <p>The right chart says the same in terms of energy. Earth makes a well. The shot has a total energy, the orange line. It can only go where the well is below the line. If the line is below zero it is trapped, and goes only as far as the line meets the well. If the line is at zero or higher, there is no wall: it escapes.</p>`);
+}
+
+// ---------- A turning orbit ----------
+
+let tu = null;
+function resetTurn() {
+  const { ecc, prec } = ui.v;
+  const p = 1 - ecc * ecc, k = (prec * DEG * p * p) / TAU;
+  const rp = 1 - ecc, vp = Math.sqrt((1 + ecc) / (1 - ecc));
+  tu = { k, p, y: [rp, 0, 0, vp], t: 0, trail: [{ x: rp, y: 0 }], peri: [{ x: rp, y: 0, a: 0 }], lastVr: 0, ang: 0, n: 0 };
+}
+function stepTurn(dt) {
+  const f = (y) => { const r = Math.hypot(y[0], y[1]), g = -(1 / (r * r) + tu.k / r ** 4) / r; return [y[2], y[3], g * y[0], g * y[1]]; };
+  const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
+  for (let i = 0; i < n; i++) {
+    const y0 = tu.y;
+    tu.y = Spin.rk4(f, tu.y, 0, h);
+    const vr0 = (y0[0] * y0[2] + y0[1] * y0[3]), vr1 = (tu.y[0] * tu.y[2] + tu.y[1] * tu.y[3]);
+    if (vr0 < 0 && vr1 >= 0) { // the nearest point of this trip
+      let a = Math.atan2(tu.y[1], tu.y[0]); if (a < 0) a += TAU;
+      let da = a - (tu.peri[tu.peri.length - 1].a % TAU); while (da < -0.5) da += TAU;
+      tu.peri.push({ x: tu.y[0], y: tu.y[1], a: tu.peri[tu.peri.length - 1].a + da });
+    }
+    tu.t += h;
+    if (i % 3 === 0) tu.trail.push({ x: tu.y[0], y: tu.y[1] });
+  }
+  if (tu.trail.length > 9000) tu.trail.splice(0, 3000);
+}
+function drawTurn() {
+  if (!tu) resetTurn();
+  if (tr.running) stepTurn(tr.dt * 4);
+  if (tu.peri.length > 26) tr.finish();
+  const { ecc } = ui.v;
+  const L = pens[0].begin().box(-1.7, 1.7, -1.5, 1.5, 8);
+  L.circle({ x: 0, y: 0 }, 0.04, { fill: '#ffd54f', stroke: '#fff', width: 1.5 });
+  L.line(tu.trail, 'rgba(79,195,247,0.8)', 1.6);
+  tu.peri.forEach((q, i) => { L.line([{ x: 0, y: 0 }, V.mul(q, 1.4)], `rgba(255,162,74,${0.25 + 0.5 * (i / Math.max(1, tu.peri.length))})`, 1.4); L.dot(q, C.ink, 3.5); });
+  L.dot({ x: tu.y[0], y: tu.y[1] }, '#fff', 6);
+  L.note('Each orange line points at the nearest point of one trip');
+  const trips = tu.peri.length - 1;
+  const per = trips > 0 ? tu.peri[trips].a / trips / DEG : 0;
+  const q = pens[1].begin();
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: 26, y0: 0, y1: ui.v.prec * 26 * 1.1, title: 'Direction of the nearest point (degrees) against number of trips', xTicks: 6, yTicks: 5, fmtX: (v) => v.toFixed(0), xTitle: 'trips around' });
+  ch.line(tu.peri.map((p, i) => ({ x: i, y: p.a / DEG })), C.ink, 3);
+  tu.peri.forEach((p, i) => ch.dot(i, p.a / DEG, '#fff', 3.5));
+  ch.line([{ x: 0, y: 0 }, { x: 26, y: ui.v.prec * 26 }], 'rgba(255,255,255,0.3)', 1.5, [5, 4]);
+  app.explain(`${nums([['turn of the nearest point, measured', `${per.toFixed(1)}°`, 'each trip'], ['asked for', `${ui.v.prec}°`, 'each trip'], ['trips so far', String(trips)]])}
+    <p>With a pure inverse-square pull, an orbit is a closed ellipse that returns to the same path forever. Add a little extra pull that falls faster than the square of the distance (here, 1/r⁴), and the ellipse no longer closes. The nearest point comes round a little farther each trip, and the orbit draws a rosette. The right chart counts the turn: a steady slope.</p>
+    <p>This happens to Mercury. Its nearest point advances by 574 arc-seconds a century. The other planets explain 531 of it. The last <b>43 arc-seconds</b> were an old puzzle, until Einstein's general relativity in 1915 added exactly a small extra pull of this kind. The real turn is about 0.1 arc-second per trip. Here it is drawn about a hundred thousand times too large, so you can see it.</p>`);
+}
+
+function resetAll() { shot = null; tu = null; }
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'kepler') drawKepler(); else if (m === 'launch') drawLaunch(); else drawTurn();
+}
+tr.onStart = () => { resetAll(); };
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Gyroscopes · Spin</title>
+<meta name="description" content="Why a spinning wheel does not fall over and why it turns sideways when you push it: a heavy top with precession and nutation, and a wheel you can push." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V3, fmt, nums, TAU, DEG } = Spin;
+const G = 9.81;
+
+const app = Spin.app({
+  slug: 'gyroscope',
+  sub: 'A torque does not turn a spinning wheel the way you push. It turns the axle at right angles to the push.',
+  views: [{ caption: 'The wheel (drag to turn the view)' }, { caption: 'The axle, from above and from the side' }],
+  go: 'Release', loop: false, speed: { min: 0.1, max: 1, value: 0.5, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+const cam = new Spin.Cam3(pens[0], { az: 0.7, el: 0.35, dist: 1.0, fov: 36, min: 0.6, max: 5, target: { x: 0, y: 0, z: 0.03 } });
+
+app.modes('mode', [['top', 'Heavy top'], ['push', 'Push the axle']]);
+const is = (m) => (v) => v.mode === m;
+ui.slider('spin', { label: 'Spin of the wheel', min: 2, max: 25, step: 0.5, value: 6, fmt: (v) => `${v} turns a second`, show: is('top') });
+ui.slider('tilt', { label: 'Tilt of the axle from upright', min: 10, max: 150, step: 1, value: 60, fmt: (v) => `${v}°`, show: is('top') });
+ui.seg('start', [['let', 'Let go'], ['steady', 'Start in steady precession']], { label: 'Start', show: is('top') });
+ui.check('rev', 'Spin it the other way', false);
+ui.slider('pspin', { label: 'Spin of the wheel', min: 0, max: 8, step: 0.5, value: 3, fmt: (v) => (v === 0 ? 'not spinning' : `${v} turns a second`), show: is('push') });
+ui.hint('Each push is a firm shove for a third of a second, at the near end of the axle.', { show: is('push') });
+const pushBox = ui.actions([
+  { text: 'Push up', fn: () => push({ x: 0, y: 0, z: 1 }) }, { text: 'Push down', fn: () => push({ x: 0, y: 0, z: -1 }) },
+  { text: 'Push right', fn: () => push({ x: 0, y: 1, z: 0 }) }, { text: 'Push left', fn: () => push({ x: 0, y: -1, z: 0 }) },
+  { text: 'Put it back', fn: () => initPush() },
+], { show: is('push') });
+app.credit('The wheel spin is drawn slower than it is. The axle is held at one end (heavy top) or at the middle (push).');
+
+// ---------- The heavy top ----------
+// Euler's equations for a symmetric top with one end fixed, in the angles theta (tilt), phi (around the
+// vertical) and psi (spin). Two quantities stay fixed and give phi' from theta.
+
+const M = 1, LEN = 0.12, RAD = 0.14;
+const I3 = 0.5 * M * RAD * RAD, I1 = 0.25 * M * RAD * RAD + M * LEN * LEN;
+let S = null, hist = [];
+function initTop() {
+  const w3 = (ui.v.rev ? -1 : 1) * TAU * ui.v.spin, th = ui.v.tilt * DEG;
+  let phd = 0;
+  if (ui.v.start === 'steady') {
+    const p = I3 * w3, disc = p * p - 4 * I1 * M * G * LEN * Math.cos(th);
+    if (disc >= 0) phd = (2 * M * G * LEN) / (p + Math.sign(p) * Math.sqrt(disc));
+  }
+  S = { th, thd: 0, ph: 0, psi: 0, w3, pPhi: I1 * phd * Math.sin(th) ** 2 + I3 * w3 * Math.cos(th), phd, t: 0 };
+  hist = [];
+}
+function deriv(y) {
+  const th = Math.min(Math.PI - 0.02, Math.max(0.02, y[0])), s = Math.sin(th), c = Math.cos(th);
+  const phd = (S.pPhi - I3 * S.w3 * c) / (I1 * s * s);
+  return [y[1], (I1 * phd * phd * s * c - I3 * S.w3 * phd * s + M * G * LEN * s) / I1, phd];
+}
+function stepTop(dt) {
+  const h = 0.0015, n = Math.max(1, Math.ceil(dt / h));
+  for (let i = 0; i < n; i++) {
+    const y = Spin.rk4(deriv, [S.th, S.thd, S.ph], 0, dt / n);
+    S.th = Math.min(Math.PI - 0.02, Math.max(0.02, y[0])); S.thd = y[1]; S.ph = y[2];
+    S.phd = deriv([S.th, S.thd, S.ph])[2];
+    S.psi += (S.w3 - S.phd * Math.cos(S.th)) * (dt / n);
+  }
+  S.t += dt;
+}
+
+// ---------- The wheel you push ----------
+
+const IW3 = 0.25, IWP = 0.13, PUSH_TIME = 0.3, PUSH_TORQUE = 5, ARM = 0.38;
+let P = null;
+function initPush() {
+  const w3 = (ui.v.rev ? -1 : 1) * TAU * ui.v.pspin;
+  P = { n: { x: 1, y: 0, z: 0 }, L: { x: IW3 * w3, y: 0, z: 0 }, w: { x: 0, y: 0, z: 0 }, psi: 0, w3, pulse: null, tp: 0, trail: [] };
+}
+function push(dir) {
+  if (ui.v.mode !== 'push') return;
+  if (!P) initPush();
+  const F = V3.mul(dir, 1);
+  P.pulse = { F, tau: V3.mul(V3.cross(V3.mul(P.n, ARM), F), PUSH_TORQUE / ARM), tp: 0 };
+}
+function stepPush(dt) {
+  const h = 0.002, n = Math.max(1, Math.ceil(dt / h)), d = dt / n;
+  for (let i = 0; i < n; i++) {
+    let tau = { x: 0, y: 0, z: 0 };
+    if (P.pulse) { P.pulse.tp += d; tau = P.pulse.tau; if (P.pulse.tp >= PUSH_TIME) P.pulse = null; }
+    if (P.w3 !== 0) {
+      // Fast spin: the angular momentum follows the torque, and the axle follows the angular momentum.
+      P.L = V3.add(P.L, V3.mul(tau, d));
+      P.n = V3.mul(V3.norm(P.L), Math.sign(P.w3));
+    } else {
+      // No spin: the wheel turns the way it is pushed, and air slows it down.
+      P.w = V3.add(P.w, V3.mul(V3.sub(V3.mul(tau, 1 / IWP), V3.mul(P.w, 8)), d));
+      P.n = V3.norm(V3.add(P.n, V3.mul(V3.cross(P.w, P.n), d)));
+    }
+    P.psi += P.w3 * 0.1 * d;
+  }
+  const tip = V3.mul(P.n, ARM * 1.15);
+  P.trail.push(tip); if (P.trail.length > 400) P.trail.shift();
+}
+
+// ---------- Drawing ----------
+
+function basis(n) {
+  // Two unit vectors at right angles to n.
+  const up = Math.abs(n.z) > 0.95 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 };
+  const e1 = V3.norm(V3.cross(up, n)), e2 = V3.cross(n, e1);
+  return [e1, e2];
+}
+function wheel3(c, n, rad, psi, color) {
+  const [e1, e2] = basis(n);
+  const at = (a) => V3.add(c, V3.add(V3.mul(e1, Math.cos(a) * rad), V3.mul(e2, Math.sin(a) * rad)));
+  const rim = []; for (let k = 0; k < 48; k++) rim.push(at((k / 48) * TAU));
+  cam.faces([{ pts: rim, fill: 'rgba(79,195,247,0.22)', stroke: color, width: 2.5 }]);
+  for (let k = 0; k < 8; k++) cam.line([c, at(psi + (k * TAU) / 8)], k === 0 ? C.ink : 'rgba(255,255,255,0.4)', k === 0 ? 3 : 1.4);
+}
+function floor3(z, r) {
+  const ring = []; for (let k = 0; k <= 40; k++) ring.push({ x: r * Math.cos((k / 40) * TAU), y: r * Math.sin((k / 40) * TAU), z });
+  cam.line(ring, 'rgba(155,231,166,0.4)', 1.5);
+  for (let k = 0; k < 8; k++) cam.line([{ x: 0, y: 0, z }, { x: r * Math.cos((k * TAU) / 8), y: r * Math.sin((k * TAU) / 8), z }], 'rgba(155,231,166,0.14)', 1);
+}
+
+function drawTop(dt) {
+  if (!S) initTop();
+  const running = tr.running;
+  if (running) { stepTop(dt); hist.push({ t: S.t, th: S.th }); if (hist.length > 3000) hist.shift(); } else S.psi += S.w3 * 0.1 * dt;
+  const { th, ph } = S;
+  const n = { x: Math.sin(th) * Math.cos(ph), y: Math.sin(th) * Math.sin(ph), z: Math.cos(th) };
+  const c = V3.mul(n, LEN);
+  const sgn = Math.sign(S.w3);
+
+  pens[0].begin(); cam.begin();
+  floor3(-0.1, 0.25);
+  cam.line([{ x: 0, y: 0, z: -0.1 }, { x: 0, y: 0, z: 0 }], 'rgba(255,255,255,0.7)', 4);
+  cam.line([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 0.28 }], 'rgba(255,255,255,0.22)', 1.2, [4, 5]);
+  cam.line(trailTop, C.ink, 2.5);
+  cam.line([V3.mul(n, -0.03), V3.mul(n, LEN * 1.9)], 'rgba(255,255,255,0.85)', 4);
+  wheel3(c, n, RAD, S.psi * 0.1, C.ball);
+  trailTop.push(V3.mul(n, LEN * 1.9)); if (trailTop.length > 500) trailTop.shift();
+  cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(n, 0.17 * sgn), C.spin, 3.5, 'L (spin)');
+  cam.arrow(c, { x: 0, y: 0, z: -0.09 }, C.friend, 3, 'weight');
+  const tau = V3.mul(V3.cross({ x: 0, y: 0, z: 1 }, n), 0.2);
+  cam.arrow({ x: 0, y: 0, z: 0 }, tau, C.you, 3, 'torque');
+  cam.dot({ x: 0, y: 0, z: 0 }, '#fff', 4);
+  pens[0].note(!running ? 'Held at the start. Press Release.' : 'It does not fall: the axle turns around the vertical');
+
+  // Right: from above, and the tilt against time.
+  const p = pens[1].begin();
+  const topRect = { x: 0, y: 0, w: p.cw, h: p.ch * 0.64 };
+  p.box(-1.25, 1.25, -1.25, 1.25, 10, topRect);
+  p.circle({ x: 0, y: 0 }, 1, { stroke: 'rgba(255,255,255,0.18)', width: 1, dash: [4, 5] });
+  const tip = (a, b) => ({ x: Math.sin(a) * Math.cos(b), y: Math.sin(a) * Math.sin(b) });
+  p.line(tipTrail, C.ink, 2.2);
+  tipTrail.push(tip(th, ph)); if (tipTrail.length > 1500) tipTrail.shift();
+  const T = tip(th, ph);
+  p.line([{ x: 0, y: 0 }, T], 'rgba(255,255,255,0.8)', 3);
+  const vel = { x: Math.cos(th) * S.thd * Math.cos(ph) - Math.sin(th) * Math.sin(ph) * S.phd, y: Math.cos(th) * S.thd * Math.sin(ph) + Math.sin(th) * Math.cos(ph) * S.phd };
+  const tq = { x: -Math.sin(ph), y: Math.cos(ph) }; // the torque of the weight points this way (around the vertical)
+  p.arrow(T, V3.mul({ ...tq, z: 0 }, 0.4 * Math.max(0.3, Math.sin(th))), C.you, 3, 'torque');
+  if (running && Math.hypot(vel.x, vel.y) > 1e-3) p.arrow(T, V3.mul({ ...vel, z: 0 }, Math.min(0.5, 0.12)), C.spin, 3);
+  p.dot({ x: 0, y: 0 }, '#fff', 4);
+  p.dot(T, C.ink, 6);
+  p.textS('From above: the tip of the axle', p.cw / 2, 8, { base: 'top', color: 'rgba(255,255,255,0.75)' });
+  const t1 = S.t, t0 = Math.max(0, t1 - 6);
+  const ch = p.chart({ x: 6, y: p.ch * 0.66, w: p.cw - 12, h: p.ch * 0.34 - 4 }, { x0: t0, x1: Math.max(t0 + 6, 6), y0: 0, y1: 180, yTicks: 3, xTicks: 6, title: 'Tilt of the axle (degrees) against time (s)', fmtX: (v) => v.toFixed(0), padB: 20 });
+  ch.line(hist.filter((q) => q.t >= t0).map((q) => ({ x: q.t, y: q.th / DEG })), C.ball, 2.5);
+  ch.hline(ui.v.tilt, 'rgba(255,255,255,0.3)');
+
+  const slow = (M * G * LEN) / Math.abs(I3 * S.w3);
+  const meas = S.t > 1 ? S.ph / S.t : NaN;
+  const wob = hist.length ? Math.max(...hist.map((q) => q.th)) - Math.min(...hist.map((q) => q.th)) : 0;
+  app.explain(`${nums([
+    ['precession, from the formula', `${(slow / TAU).toFixed(2)}`, 'turns a second'],
+    ['measured so far', Number.isFinite(meas) ? `${(Math.abs(meas) / TAU).toFixed(2)}` : '–', 'turns a second'],
+    ['nutation, up and down', `${(wob / DEG).toFixed(1)}°`],
+  ])}
+    <p>Gravity pulls down on the middle of the wheel, but the end of the axle is held. The pull makes a <b>torque</b> (the green arrow) that points sideways, along the ground. A torque changes the angular momentum L by adding to it: <b>L moves toward the torque</b>. L points along the axle, so the axle swings sideways around the vertical. That slow turn is <b>precession</b>, at about M g l / (Iω) = ${(slow / TAU).toFixed(2)} turns a second. A faster spin gives a slower precession.</p>
+    <p>If you let go with the axle at rest, it first dips a little and then rises again, many times a second. That ripple is <b>nutation</b>, and it shows up as small loops in the trace. Start in steady precession to remove it. A wheel that spins too slowly cannot keep up and falls.</p>`);
+}
+const trailTop = [], tipTrail = [];
+
+function drawPush(dt) {
+  if (!P) initPush();
+  stepPush(dt);
+  const n = P.n, sgn = Math.sign(P.w3) || 1;
+  pens[0].begin(); cam.begin();
+  const rad = 0.28, half = ARM * 1.15;
+  // Handles at the ends of the axle.
+  cam.line([V3.mul(n, -half), V3.mul(n, half)], 'rgba(255,255,255,0.85)', 4);
+  wheel3({ x: 0, y: 0, z: 0 }, n, rad, P.psi, C.ball);
+  cam.line(P.trail, C.ink, 2.2);
+  cam.dot(V3.mul(n, half), C.ink, 6);
+  cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(n, 0.55 * sgn * (P.w3 === 0 ? 0 : 1)), C.spin, 3.5, 'L (spin)');
+  if (P.pulse) cam.arrow(V3.sub(V3.mul(n, half), V3.mul(P.pulse.F, 0.3)), V3.mul(P.pulse.F, 0.3), C.friend, 4, 'your push');
+  if (P.pulse) cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(P.pulse.tau, 0.1), C.you, 4, 'torque');
+  pens[0].note(P.w3 === 0 ? 'Not spinning: it turns the way you push' : 'Spinning: it turns at right angles to the push');
+
+  const p = pens[1].begin();
+  const half2 = p.ch / 2;
+  const views = [
+    { rect: { x: 0, y: 0, w: p.cw, h: half2 }, map: (q) => ({ x: q.y, y: -q.x }), label: 'From above (the near end of the axle is at the bottom)', from: 'top' },
+    { rect: { x: 0, y: half2, w: p.cw, h: half2 }, map: (q) => ({ x: q.y, y: q.z }), label: 'From the near end (up is up)', from: 'end' },
+  ];
+  for (const v of views) {
+    p.box(-0.7, 0.7, -0.7, 0.7, 14, v.rect);
+    p.circle({ x: 0, y: 0 }, half, { stroke: 'rgba(255,255,255,0.15)', width: 1, dash: [4, 5] });
+    p.line(P.trail.map(v.map), C.ink, 2.2);
+    p.line([{ x: 0, y: 0 }, v.map(V3.mul(n, half))], 'rgba(255,255,255,0.85)', 4);
+    p.dot(v.map(V3.mul(n, half)), C.ink, 6);
+    p.dot({ x: 0, y: 0 }, '#fff', 4);
+    if (P.pulse) {
+      const F = v.map(P.pulse.F);
+      if (Math.hypot(F.x, F.y) > 0.1) p.arrow(V3.sub(v.map(V3.mul(n, half)), { x: F.x * 0.3, y: F.y * 0.3 }), V3.mul(F, 0.3), C.friend, 4, 'push');
+    }
+    p.textS(v.label, p.cw / 2, v.rect.y + 6, { base: 'top', color: 'rgba(255,255,255,0.75)', size: 11 });
+  }
+  const L = P.w3 === 0 ? 0 : IW3 * Math.abs(P.w3);
+  const turn = L > 0 ? ((PUSH_TORQUE * PUSH_TIME) / L) / DEG : NaN;
+  app.explain(`${nums([['angular momentum of the spin', L.toFixed(1)], ['one push turns the axle by about', Number.isFinite(turn) ? `${turn.toFixed(0)}°` : '–']])}
+    <p>Push up on the near end of a spinning wheel's axle, and the axle does not go up. It swings <b>sideways</b>. Your push makes a torque, and the torque adds a small piece to the angular momentum L. The new L points a little toward the torque, so the axle turns toward the torque, at right angles to the push.</p>
+    <p>The faster the spin, the larger L is, and the less one push can turn it (the number above gets smaller). With the wheel <b>not spinning</b>, there is no L to add to, and the axle simply goes the way it is pushed.</p>`);
+}
+
+ui.on((id) => {
+  if (id === 'mode') { S = null; P = null; trailTop.length = 0; tipTrail.length = 0; tr.reset(); tr.setGo(ui.v.mode === 'top' ? 'Release' : 'Put it back');
+    if (ui.v.mode === 'top') Object.assign(cam, { az: 0.7, el: 0.35, dist: 1.0 }); else Object.assign(cam, { az: 0.35, el: 0.3, dist: 3.4, min: 1.5 }); }
+  else if (ui.v.mode === 'top') { S = null; trailTop.length = 0; tipTrail.length = 0; tr.reset(); }
+  else { initPush(); }
+});
+tr.onStart = () => {
+  if (ui.v.mode === 'top') { initTop(); trailTop.length = 0; tipTrail.length = 0; } else initPush();
+};
+let lastT = performance.now();
+Spin.run((now) => {
+  tr.step(now);
+  const dt = Math.min(0.1, (now - lastT) / 1000) * tr.speed;
+  lastT = now;
+  if (ui.v.mode === 'top') drawTop(dt); else drawPush(dt);
+});
+</script>
+</body>
+</html>

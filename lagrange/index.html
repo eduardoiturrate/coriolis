@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Lagrange points · Spin</title>
+<meta name="description" content="Five places near two large bodies where a small body can stay in place. Place a particle on the turning map and watch it, from above and from the turning frame." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'lagrange',
+  sub: 'In the frame that turns with the two big bodies, they stand still. A small body feels their pull, a push outward, and the Coriolis force. At five points these balance.',
+  views: [{ caption: 'Seen from space, not turning' }, { caption: 'Seen from the turning frame (click to place a particle)' }],
+  go: 'Restart the particle', speed: { min: 0.2, max: 6, value: 1.5, step: 0.1 },
+});
+const { ui, tr, pens } = app;
+
+const PAIRS = { se: ['Sun and Earth', 3.003e-6, 1.496e8], sj: ['Sun and Jupiter', 9.54e-4, 7.785e8], em: ['Earth and Moon', 0.01215, 384400], pc: ['Pluto and Charon', 0.1085, 19596], eq: ['Two equal stars', 0.5, 0] };
+let pair = 'em';
+ui.slider('mu', { label: 'The smaller body’s share of the mass', min: 1e-6, max: 0.5, log: true, value: 0.01215, fmt: (v) => (v < 0.001 ? v.toExponential(1) : v.toFixed(4)), hint: (v) => (v.mu < 0.0385 ? 'Below 0.0385, the points L4 and L5 are stable.' : 'Above 0.0385, L4 and L5 are unstable too.') });
+ui.chips(Object.entries(PAIRS).map(([k, p]) => ({ text: p[0].replace('Two equal stars', 'Equal stars'), set: { mu: p[1] }, key: k })));
+ui.section('Place a particle');
+ui.pick('where', [['L1', 'At L1'], ['L2', 'At L2'], ['L3', 'At L3'], ['L4', 'At L4'], ['L5', 'At L5'], ['free', 'Where I click']], { cols: 3 });
+ui.slider('off', { label: 'How far it starts from the point', min: 0, max: 0.15, step: 0.002, value: 0.02, fmt: (v) => (v === 0 ? 'exactly at it' : v.toFixed(3)) });
+ui.check('map', 'Show the map of the potential', true);
+ui.hint('The map shows the pull and the push outward together: lines join points of equal value, and brighter means nearer a big body. Black patches are places the particle can never reach, because it does not have the energy.');
+
+let st = null, mapCache = null, clicked = null;
+const L = { mu: 0, pts: {} };
+
+function points(mu) {
+  const ox = (x) => x - (1 - mu) * (x + mu) / Math.abs(x + mu) ** 3 - mu * (x - 1 + mu) / Math.abs(x - 1 + mu) ** 3;
+  const solve = (a, b) => { let fa = ox(a); for (let i = 0; i < 90; i++) { const m = (a + b) / 2, fm = ox(m); if ((fm > 0) === (fa > 0)) { a = m; fa = fm; } else b = m; } return (a + b) / 2; };
+  const d = 1e-9;
+  return { L1: { x: solve(-mu + d, 1 - mu - d), y: 0 }, L2: { x: solve(1 - mu + d, 3), y: 0 }, L3: { x: solve(-3, -mu - d), y: 0 }, L4: { x: 0.5 - mu, y: Math.sqrt(3) / 2 }, L5: { x: 0.5 - mu, y: -Math.sqrt(3) / 2 } };
+}
+const omega = (x, y, mu) => 0.5 * (x * x + y * y) + (1 - mu) / Math.hypot(x + mu, y) + mu / Math.hypot(x - 1 + mu, y);
+
+function setParticle() {
+  const mu = ui.v.mu, pts = points(mu);
+  let p;
+  if (ui.v.where === 'free') p = clicked || { x: 0.5, y: 0.3 };
+  else { const q = pts[ui.v.where]; const a = ui.v.where === 'L4' || ui.v.where === 'L5' ? V.polar(1, 0.5) : { x: 1, y: 0.3 }; p = V.add(q, V.mul(V.norm(a), ui.v.off)); }
+  st = { y: [p.x, p.y, 0, 0], t: 0, trail: [{ x: p.x, y: p.y, t: 0 }], done: '', mu, id: (st ? st.id : 0) + 1 };
+  mapCache = null;
+  L.mu = mu; L.pts = pts;
+}
+ui.on((id) => {
+  if (id === 'mu') { pair = 'custom'; if (ui.v.where !== 'free') { /* keep */ } }
+  if (id === 'where' && ui.v.where === 'free') clicked = clicked || { x: 0.5, y: 0.3 };
+  setParticle(); tr.restart();
+});
+tr.onStart = () => setParticle();
+
+function rhs(mu) {
+  return (s) => {
+    const x = s[0], y = s[1], vx = s[2], vy = s[3];
+    const r1 = Math.hypot(x + mu, y), r2 = Math.hypot(x - 1 + mu, y);
+    const ox = x - (1 - mu) * (x + mu) / r1 ** 3 - mu * (x - 1 + mu) / r2 ** 3;
+    const oy = y - (1 - mu) * y / r1 ** 3 - mu * y / r2 ** 3;
+    return [vx, vy, 2 * vy + ox, -2 * vx + oy];
+  };
+}
+function step(dt) {
+  if (st.done) return;
+  const f = rhs(st.mu);
+  let left = dt, guard = 0;
+  while (left > 1e-9 && guard++ < 3000) {
+    const r1 = Math.hypot(st.y[0] + st.mu, st.y[1]), r2 = Math.hypot(st.y[0] - 1 + st.mu, st.y[1]);
+    const h = Math.min(left, 0.004, 0.03 * Math.min(r1, r2) ** 1.5 + 1e-5);
+    st.y = Spin.rk4(f, st.y, 0, h); st.t += h; left -= h;
+    const q1 = Math.hypot(st.y[0] + st.mu, st.y[1]), q2 = Math.hypot(st.y[0] - 1 + st.mu, st.y[1]);
+    if (q1 < 0.012) { st.done = 'hit the larger body'; break; }
+    if (q2 < 0.006) { st.done = 'hit the smaller body'; break; }
+    if (Math.hypot(st.y[0], st.y[1]) > 5) { st.done = 'escaped'; break; }
+  }
+  const last = st.trail[st.trail.length - 1];
+  if (Math.hypot(st.y[0] - last.x, st.y[1] - last.y) > 0.004) st.trail.push({ x: st.y[0], y: st.y[1], t: st.t });
+  if (st.trail.length > 6000) st.trail.splice(0, 1000);
+}
+
+function buildMap() {
+  const mu = st.mu, N = 320, X = 1.75;
+  const cv = document.createElement('canvas'); cv.width = N; cv.height = N;
+  const g = cv.getContext('2d'), img = g.createImageData(N, N);
+  const cj = 2 * omega(st.trail[0].x, st.trail[0].y, mu);
+  for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+    const x = -X + (2 * X * i) / (N - 1), y = X - (2 * X * j) / (N - 1);
+    const om = omega(x, y, mu);
+    const u = Math.pow(Math.min(1, Math.max(0, (om - 1.5) / 2.2)), 0.7);
+    const line = Math.pow(0.5 + 0.5 * Math.cos(TAU * om * 5), 14);
+    let r = 14 + 46 * u + 70 * line, gg = 30 + 90 * u + 110 * line, bb = 56 + 130 * u + 150 * line;
+    if (2 * om < cj) { r = 3; gg = 6; bb = 12; }
+    const o = (j * N + i) * 4;
+    img.data[o] = r; img.data[o + 1] = gg; img.data[o + 2] = bb; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return { cv, X, cj };
+}
+
+function drawAll(now) {
+  tr.step(now);
+  if (!st || st.mu !== ui.v.mu) setParticle();
+  if (tr.running && tr.dt > 0) step(tr.dt * 2);
+  if (st.done && tr.running) tr.finish();
+  const mu = st.mu, t = st.t;
+  const P1 = { x: -mu, y: 0 }, P2 = { x: 1 - mu, y: 0 };
+  const pRot = { x: st.y[0], y: st.y[1] };
+
+  // Left: space. The two bodies go round their middle.
+  const A = pens[0].begin().box(-1.8, 1.8, -1.8, 1.8, 8);
+  const inr = (q, tt) => V.rot(q, tt);
+  A.circle({ x: 0, y: 0 }, 1 - mu, { stroke: 'rgba(255,213,79,0.18)', width: 1, dash: [3, 5] });
+  A.circle({ x: 0, y: 0 }, mu, { stroke: 'rgba(79,195,247,0.18)', width: 1, dash: [3, 5] });
+  A.line(st.trail.map((q) => inr(q, q.t)), C.ink, 2);
+  A.circle(inr(P1, t), 0.045 + 0.05 * Math.sqrt(1 - mu), { fill: '#ffd54f', stroke: '#fff', width: 1.5 });
+  A.circle(inr(P2, t), 0.03 + 0.04 * Math.cbrt(mu), { fill: '#4fc3f7', stroke: '#fff', width: 1.5 });
+  A.dot(inr(pRot, t), '#fff', 5.5);
+  A.note(st.done ? `The particle ${st.done}` : 'The two big bodies circle their common center');
+
+  // Right: the turning frame.
+  const B = pens[1].begin().box(-1.8, 1.8, -1.8, 1.8, 8);
+  if (ui.v.map) {
+    if (!mapCache || mapCache.id !== st.id) { mapCache = buildMap(); mapCache.id = st.id; }
+    const tl = B.P({ x: -mapCache.X, y: mapCache.X }), wpx = B.L(2 * mapCache.X);
+    B.ctx.imageSmoothingEnabled = true;
+    B.ctx.drawImage(mapCache.cv, tl.x, tl.y, wpx, wpx);
+  }
+  B.line(st.trail, C.ink, 2.2);
+  B.circle(P1, 0.045 + 0.05 * Math.sqrt(1 - mu), { fill: '#ffd54f', stroke: '#fff', width: 1.5 });
+  B.circle(P2, 0.03 + 0.04 * Math.cbrt(mu), { fill: '#4fc3f7', stroke: '#fff', width: 1.5 });
+  const stable = mu < 0.03852;
+  for (const [k, q] of Object.entries(L.pts)) {
+    B.dot(q, (k === 'L4' || k === 'L5') && stable ? C.you : C.warn, 4.5);
+    B.text(k, q, { dx: 12, dy: -10, size: 11.5, color: (k === 'L4' || k === 'L5') && stable ? C.you : C.warn });
+  }
+  B.dot(pRot, '#fff', 6);
+  B.note(ui.v.where === 'free' ? 'Click here to place the particle' : 'Green points are stable, red ones are not');
+
+  const pts = L.pts, dsec = PAIRS[pair] ? PAIRS[pair][2] : 0;
+  const km = (d) => (dsec ? ` (${Math.round(d * dsec).toLocaleString('en-US')} km)` : '');
+  app.explain(`${nums([['the mass ratio', mu < 0.001 ? mu.toExponential(2) : mu.toFixed(4)], ['L1 is', `${((1 - mu - pts.L1.x) * 100).toFixed(1)}%`, `of the way back from the small body${km(1 - mu - pts.L1.x)}`], ['L2 is', `${((pts.L2.x - 1 + mu) * 100).toFixed(1)}%`, `beyond it${km(pts.L2.x - 1 + mu)}`], ['L4 and L5', stable ? 'stable' : 'unstable']])}
+    <p>The two big bodies circle their common center. In a frame that turns with them, they stand still, and a small body feels three things: the pull of each big one, a push outward (the “centrifugal” force), and the Coriolis force that bends its motion. At <b>five points</b> the pulls and the push cancel, and a particle placed there with no speed stays there. The map shows the combined effect as a landscape: <b>L1, L2 and L3</b> are saddles on the line through the two bodies, and a particle put there slides off. <b>L4 and L5</b> sit at the tops of hills, on the corners of equilateral triangles.</p>
+    <p>A particle on a hilltop should roll off, but for L4 and L5 the Coriolis force turns it into a slow loop around the point instead (try the Sun and Jupiter: this is how the Trojan asteroids are held). This works only if the small body has less than 3.85% of the mass (Routh's limit): see what happens with equal stars. Real spacecraft use L1 and L2 of the Sun and Earth (SOHO, the James Webb telescope), moving in loops around the point, with small corrections to stay on them.</p>`);
+}
+
+pens[1].pointer({
+  down(w) { clicked = { x: w.x, y: w.y }; ui.set('where', 'free'); },
+});
+
+setParticle();
+tr.restart();
+Spin.run(drawAll);
+</script>
+</body>
+</html>

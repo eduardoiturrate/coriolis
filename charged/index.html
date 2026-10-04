@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Charged particles · Spin</title>
+<meta name="description" content="A charge in a magnetic field circles. Add an electric field and it drifts sideways. In Earth's dipole field it spirals, bounces between the poles and drifts around the planet." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, V3, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'charged',
+  sub: 'A magnetic force always pushes at right angles to the motion. It turns a charge, but never speeds it up.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', loop: true, speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['b', 'Magnetic field'], ['drift', 'Electric and magnetic'], ['belt', 'Earth’s belts']]);
+const is = (m) => (v) => v.mode === m;
+
+// Constants
+const QE = 1.602176634e-19, ME = 9.1093837e-31, MP = 1.67262192e-27, CL = 2.99792458e8, RE = 6.371e6;
+const eng = (e) => (e >= 1e6 ? `${+(e / 1e6).toPrecision(3)} MeV` : e >= 1e3 ? `${+(e / 1e3).toPrecision(3)} keV` : `${+e.toPrecision(3)} eV`);
+const freq = (f) => (f >= 1e9 ? `${(f / 1e9).toFixed(2)} GHz` : f >= 1e6 ? `${(f / 1e6).toFixed(2)} MHz` : f >= 1e3 ? `${(f / 1e3).toFixed(2)} kHz` : `${f.toFixed(1)} Hz`);
+const tim = (s) => (s >= 3600 ? `${(s / 3600).toFixed(1)} h` : s >= 60 ? `${(s / 60).toFixed(1)} min` : s >= 1 ? `${s.toFixed(2)} s` : s >= 1e-3 ? `${(s * 1e3).toFixed(1)} ms` : s >= 1e-6 ? `${(s * 1e6).toFixed(1)} µs` : `${(s * 1e9).toFixed(1)} ns`);
+
+// Magnetic field
+ui.seg('who', [['e', 'Electron'], ['p', 'Proton']], { label: 'Particle', show: (v) => v.mode !== 'drift' });
+ui.slider('en', { label: 'Energy', min: 10, max: 1e5, log: true, value: 100, fmt: (v) => eng(v), show: is('b') });
+ui.slider('bt', { label: 'Magnetic field', min: 0.05, max: 50, log: true, value: 1, fmt: (v) => `${v} mT`, show: is('b'), hint: 'For comparison: Earth’s field at the surface is about 0.05 mT. A fridge magnet is about 5 mT.' });
+// Electric and magnetic
+ui.check('neg', 'Negative charge', false, { show: is('drift') });
+ui.slider('E', { label: 'Electric field, against the magnetic field', min: 0.1, max: 1, step: 0.05, value: 0.5, fmt: (v) => v.toFixed(2), show: is('drift') });
+ui.slider('u', { label: 'Starting speed along the drift', min: 0, max: 3, step: 0.1, value: 0, fmt: (v) => (v === 0 ? 'at rest' : v === 1 ? 'the drift speed' : `${v.toFixed(1)} × the drift speed`), show: is('drift') });
+// Belts
+ui.slider('L', { label: 'Distance of the field line (L, in Earth radii)', min: 1.5, max: 6, step: 0.1, value: 4, fmt: (v) => v.toFixed(1), show: is('belt') });
+ui.slider('pitch', { label: 'Angle to the field at the equator', min: 5, max: 90, step: 1, value: 45, fmt: (v) => `${v}°`, show: is('belt') });
+ui.slider('ben', { label: 'Energy', min: 0.1, max: 100, log: true, value: 5, fmt: (v) => `${v} MeV`, show: is('belt') });
+
+const cam = new Spin.Cam3(pens[1], { az: 0.8, el: 0.35, dist: 13, fov: 34, min: 4, max: 30 });
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo('Restart');
+  const caps = { b: ['Seen from above: the field points out of the page', 'Speed of the particle'], drift: ['Seen in the lab', 'Seen by someone who moves with the drift'], belt: ['A slice through Earth, with the field lines', 'The same, in 3D (drag to turn)'] }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+
+// ---------- Magnetic field only ----------
+
+function particle() {
+  const m = ui.v.who === 'e' ? ME : MP;
+  return { m, q: ui.v.who === 'e' ? -QE : QE, mc2: (m * CL * CL) / QE };
+}
+function drawB(now) {
+  const { en, bt } = ui.v, pc = particle();
+  const gam = 1 + en / pc.mc2, v = CL * Math.sqrt(1 - 1 / (gam * gam));
+  const B = bt * 1e-3, r = (gam * pc.m * v) / (QE * B), T = (TAU * gam * pc.m) / (QE * B);
+  const dir = pc.q > 0 ? -1 : 1; // for a field out of the page, a positive charge turns clockwise
+  const th = dir * (TAU / 3) * tr.t; // in the picture one turn takes three seconds
+  const L = pens[0].begin().box(-1.9, 1.9, -1.9, 1.9, 10);
+  for (let gx = -1.75; gx <= 1.76; gx += 0.5) for (let gy = -1.75; gy <= 1.76; gy += 0.5) { L.dot({ x: gx, y: gy }, 'rgba(255,255,255,0.2)', 2.2); L.circle({ x: gx, y: gy }, 0.06, { stroke: 'rgba(255,255,255,0.2)', width: 1 }); }
+  L.circle({ x: 0, y: 0 }, 1, { stroke: 'rgba(255,255,255,0.22)', width: 1.5, dash: [5, 6] });
+  const pos = V.polar(1, th - dir * Math.PI / 2);
+  const tail = []; for (let a = 0; a <= 2 * Math.PI * Math.min(1, tr.t / 3 + 0.01); a += 0.05) tail.push(V.polar(1, dir * (th > 0 ? 1 : 1) * 0 + (th - dir * Math.PI / 2) - dir * a));
+  L.line(tail, C.ink, 2.5);
+  const vel = V.polar(1, th - dir * Math.PI / 2 + dir * Math.PI / 2);
+  L.arrow(pos, V.mul(vel, 0.5), C.you, 3.5, 'velocity');
+  L.arrow(pos, V.mul(V.norm(pos), -0.5), C.friend, 3.5, 'force');
+  L.line([{ x: 0, y: 0 }, pos], 'rgba(255,255,255,0.35)', 1.2, [3, 4]);
+  L.dot({ x: 0, y: 0 }, '#fff', 3);
+  L.dot(pos, pc.q > 0 ? C.ink : C.ball, 8);
+  L.text(pc.q > 0 ? '+' : '−', pos, { size: 12, color: '#111', weight: 800 });
+  L.text(`r = ${fmt.dist(r)}`, { x: 0.5, y: 0.1 }, { size: 12, color: 'rgba(255,255,255,0.8)' });
+  L.note(`${pc.q > 0 ? 'A positive charge turns clockwise' : 'A negative charge turns counterclockwise'}`);
+
+  const q = pens[1].begin();
+  const hh = q.ch / 2 - 6;
+  const c1 = q.chart({ x: 4, y: 2, w: q.cw - 8, h: hh }, { x0: 0, x1: 2, y0: -1.2, y1: 1.2, title: 'Sideways and up-down speed (against turns)', xTicks: 8, yTicks: 4, fmtY: (v) => v.toFixed(1), padB: 20 });
+  const a = [], b = [];
+  for (let s = 0; s <= 2; s += 0.01) { const ang = dir * TAU * s; a.push({ x: s, y: Math.cos(ang) }); b.push({ x: s, y: Math.sin(ang) }); }
+  c1.line(a, C.ball, 2.5); c1.line(b, C.friend, 2.5);
+  const turns = ((tr.t / 3) % 2); c1.vline(turns);
+  const c2 = q.chart({ x: 4, y: hh + 8, w: q.cw - 8, h: hh }, { x0: 0, x1: 2, y0: 0, y1: 1.5, title: 'Speed (orange) and energy (blue)', xTicks: 8, yTicks: 3, fmtY: (v) => v.toFixed(1), padB: 20 });
+  c2.line([{ x: 0, y: 1 }, { x: 2, y: 1 }], C.ink, 3); c2.line([{ x: 0, y: 1 }, { x: 2, y: 1 }], C.ball, 1.5, [6, 6]);
+  c2.vline(turns);
+  app.explain(`${nums([['speed', `${(v / 1e3).toFixed(0)}`, 'km/s'], ['radius of the circle', fmt.dist(r)], ['turns', freq(1 / T), `(once every ${tim(T)})`]])}
+    <p>The magnetic force on a moving charge is <b>q v × B</b>: always at right angles to both the velocity and the field. It can turn the particle but not speed it up, so the speed and the energy stay fixed (right) and the path is a circle. The radius is <b>r = m v / (q B)</b>: a faster or heavier particle makes a bigger circle, a stronger field a smaller one. The time for one turn does <b>not</b> depend on the speed: this is how a cyclotron works.</p>
+    <p>This is the same mathematics as the Coriolis force, which also acts at right angles to the motion and gives circles. In the Coriolis explainer, the <a href="../coriolis/" style="color:var(--accent)">ocean loops</a> are exactly such circles, with “turns a day” in place of the cyclotron frequency.</p>`);
+}
+
+// ---------- Electric and magnetic fields ----------
+
+function cmul(a, b) { return { x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x }; }
+function drawDrift(now) {
+  const { neg, E, u } = ui.v;
+  const s = neg ? -1 : 1, Om = 2, vd = E; // B = 1, so the drift speed is E
+  const w0 = { x: u * vd - vd, y: 0 };
+  const om = -s * Om; // the sense of the turning: clockwise for a positive charge
+  const T = 4 * (TAU / Om);
+  const t = tr.t;
+  if (t > T + 1) tr.finish();
+  const tt = Math.min(t, T);
+  const z = (time) => { // position relative to the moving frame
+    const e = { x: Math.cos(om * time) - 1, y: Math.sin(om * time) };
+    const c = cmul(w0, e);
+    return { x: c.y / om, y: -c.x / om }; // divide by i*om
+  };
+  const lab = (time) => V.add({ x: vd * time, y: 0 }, z(time));
+  const xmax = vd * T + 2.5, rad = Math.hypot(w0.x, w0.y) / Om;
+
+  const L = pens[0].begin().box(-2, xmax, -Math.max(2.2, rad * 2 + 0.6), Math.max(2.2, rad * 2 + 0.6), 10);
+  const yr = Math.max(2.2, rad * 2 + 0.6);
+  for (let gx = -1.5; gx < xmax; gx += 1) for (let gy = -yr + 0.5; gy < yr; gy += 1) { L.circle({ x: gx, y: gy }, 0.05, { stroke: 'rgba(255,255,255,0.18)', width: 1 }); L.dot({ x: gx, y: gy }, 'rgba(255,255,255,0.18)', 1.6); }
+  for (let gx = -1.5; gx < xmax; gx += 2) for (let gy = -yr + 1; gy < yr; gy += 2) L.arrow({ x: gx, y: gy - 0.3 }, { x: 0, y: 0.6 * E }, 'rgba(255,162,74,0.35)', 2);
+  const path = []; for (let time = 0; time <= tt; time += 0.03) path.push(lab(time));
+  L.line(path, C.ink, 3);
+  const pos = lab(tt);
+  L.dot(pos, s > 0 ? C.ink : C.ball, 8);
+  L.text(s > 0 ? '+' : '−', pos, { size: 12, color: '#111', weight: 800 });
+  L.arrow({ x: -1.6, y: -yr + 0.5 }, { x: vd * 1.4, y: 0 }, C.you, 3.5, 'drift');
+  L.note('The charge drifts sideways, at right angles to both fields');
+
+  // Right: a frame that moves with the drift: only the magnetic field is left.
+  const gc = (time) => ({ x: -w0.y / om * 0, y: 0 });
+  const R = pens[1].begin().box(-rad - 1.2, rad + 1.2, -rad - 1.2, rad + 1.2, 12);
+  R.c = { x: 0, y: 0 };
+  const ctr = { x: -(-w0.y) / om * 0 + 0, y: 0 };
+  const center = (() => { const c = cmul(w0, { x: -1, y: 0 }); return { x: c.y / om, y: -c.x / om }; })();
+  const rel = (time) => V.sub(z(time), center);
+  for (let gx = -rad - 1; gx <= rad + 1; gx += 1) for (let gy = -rad - 1; gy <= rad + 1; gy += 1) { R.circle({ x: gx, y: gy }, 0.05, { stroke: 'rgba(255,255,255,0.18)', width: 1 }); R.dot({ x: gx, y: gy }, 'rgba(255,255,255,0.18)', 1.6); }
+  R.circle(V.mul(center, 0), rad, { stroke: 'rgba(255,255,255,0.2)', width: 1.5, dash: [5, 6] });
+  const tail = []; for (let time = 0; time <= tt; time += 0.03) tail.push(rel(time));
+  R.line(tail, C.ink, 3);
+  const rp = rel(tt);
+  R.dot(rp, s > 0 ? C.ink : C.ball, 8);
+  R.text(s > 0 ? '+' : '−', rp, { size: 12, color: '#111', weight: 800 });
+  R.arrow({ x: rad + 0.9, y: rad + 0.7 }, { x: -vd * 0.9 - 0.3, y: 0 }, C.you, 3, 'the lab goes this way');
+  R.note('In this frame there is no electric field: only a circle');
+
+  app.explain(`${nums([['drift speed', `${(vd).toFixed(2)}`, 'of the unit speed'], ['circle radius (in the moving frame)', rad.toFixed(2)], ['same for both signs of charge', 'yes']])}
+    <p>The electric force pushes the charge up. As it gains speed, the magnetic force bends it, and it turns back. Then it slows, and the electric force wins again. The result is a loop that moves sideways: a <b>cycloid</b>, just like the path of a point on a rolling wheel. On average the charge drifts at <b>E / B</b>, in the direction of E × B.</p>
+    <p>The drift is the <b>same for positive and for negative charges</b>, because each sign of charge turns the other way and also is pushed the other way. Seen by someone moving at the drift speed (right), the electric field disappears, and what is left is plain circling in the magnetic field. This is the first step toward relativity: what is an electric field in one frame is partly a magnetic field in another.</p>`);
+}
+
+// ---------- Earth's belts ----------
+// A particle on a dipole field line: it circles the line, runs along it, turns back where the field is strong (the
+// mirror points), and drifts around Earth: protons west, electrons east. The animation shows bounce and drift
+// far closer in time than they are.
+
+const B_EQ = 3.12e-5;
+const gfun = (l) => Math.sqrt(1 + 3 * Math.sin(l) ** 2) / Math.cos(l) ** 6;
+let bel = null;
+function belt() {
+  const { L, pitch, ben, who } = ui.v;
+  const al = pitch * DEG, s2 = Math.sin(al) ** 2;
+  const lamAtm = Math.acos(1 / Math.sqrt(L));
+  // The mirror latitude: where sin^2(a) * g(lat) = 1.
+  let lo = 0, hi = Math.PI / 2 - 1e-6;
+  for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (s2 * gfun(mid) < 1) lo = mid; else hi = mid; }
+  const lamM = lo;
+  const lost = lamM > lamAtm;
+  const lamEnd = Math.min(lamM, lamAtm);
+  // Time from the equator to latitude lam: t(lam) = integral of cos*sqrt(1+3sin^2)/sqrt(1 - s2 g). Substitute lam = lamEnd sin(f).
+  const N = 240, tab = [{ f: 0, t: 0, lam: 0 }];
+  const integrand = (f) => {
+    const lam = lamEnd * Math.sin(f), rad = 1 - s2 * gfun(lam);
+    return (Math.cos(lam) * Math.sqrt(1 + 3 * Math.sin(lam) ** 2) * lamEnd * Math.cos(f)) / Math.sqrt(Math.max(rad, 1e-9));
+  };
+  let acc = 0;
+  for (let i = 1; i <= N; i++) {
+    const f0 = ((i - 1) / N) * (Math.PI / 2), f1 = (i / N) * (Math.PI / 2);
+    acc += ((f1 - f0) / 6) * (integrand(f0) + 4 * integrand((f0 + f1) / 2) + integrand(f1));
+    tab.push({ f: f1, t: acc, lam: lamEnd * Math.sin(f1) });
+  }
+  const Tq = lamEnd < 1e-4 ? 0 : acc;
+  const m = who === 'e' ? ME : MP, mc2 = (m * CL * CL) / QE * 1;
+  const gam = 1 + (ben * 1e6) / mc2, v = CL * Math.sqrt(1 - 1 / (gam * gam));
+  const Beq = B_EQ / L ** 3;
+  return {
+    L, al, lamM, lamAtm, lost, lamEnd, tab, Tq, v, gam, m,
+    gyroR: (gam * m * v * Math.sin(al)) / (QE * Beq), gyroT: (TAU * gam * m) / (QE * Beq),
+    bounce: Tq > 0 ? (4 * L * RE * Tq) / v : (TAU * L * RE) / v,
+    drift: (44.2 * 60) / (L * ben) * (0.5 / (0.35 + 0.15 * Math.sin(al))),
+  };
+}
+function latAt(b, u) {
+  // u: fraction of a whole bounce, 0 to 1. Equator, north mirror point, equator, south mirror point.
+  if (b.Tq === 0) return 0;
+  const q = ((u % 1) + 1) % 1 * 4, quad = Math.floor(q), f = q - quad;
+  const fwd = quad % 2 === 0 ? f : 1 - f;
+  const target = fwd * b.Tq;
+  let i = 1; while (i < b.tab.length - 1 && b.tab[i].t < target) i++;
+  const a = b.tab[i - 1], c = b.tab[i];
+  const k = (target - a.t) / ((c.t - a.t) || 1);
+  const lam = a.lam + (c.lam - a.lam) * k;
+  return quad < 2 ? lam : -lam;
+}
+const BOUNCE_VIS = 3, DRIFT_VIS = 34;
+let trail3 = [], lastKey = '';
+function drawBelt(now) {
+  const key = `${ui.v.L}|${ui.v.pitch}|${ui.v.ben}|${ui.v.who}`;
+  if (!bel || key !== lastKey) { bel = belt(); lastKey = key; trail3 = []; }
+  const b = bel, L = b.L;
+  const u = tr.t / BOUNCE_VIS, lam = latAt(b, u);
+  const sgn = ui.v.who === 'e' ? 1 : -1; // electrons drift east (toward larger longitude), protons west
+  const lon = sgn * TAU * (tr.t / DRIFT_VIS);
+  const rr = L * Math.cos(lam) ** 2;
+  const pos2 = { x: rr * Math.cos(lam), y: rr * Math.sin(lam) };
+  const P3 = { x: pos2.x * Math.cos(lon), y: pos2.x * Math.sin(lon), z: pos2.y };
+  if (tr.running && tr.dt > 0) { trail3.push(P3); if (trail3.length > 700) trail3.shift(); }
+
+  const p = pens[0].begin().box(-L * 1.05 - 0.5, L * 1.05 + 0.5, -L * 0.75, L * 0.75, 8);
+  p.circle({ x: 0, y: 0 }, 1, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  p.circle({ x: 0, y: 0 }, 1.03, { stroke: 'rgba(120,190,255,0.35)', width: 3 });
+  const line = (Lv, col, w) => { const pts = []; const la = Math.acos(1 / Math.sqrt(Lv)); for (let k = -60; k <= 60; k++) { const l = (k / 60) * la, r = Lv * Math.cos(l) ** 2; pts.push({ x: r * Math.cos(l), y: r * Math.sin(l) }); } p.line(pts, col, w); const pm = pts.map((q) => ({ x: -q.x, y: q.y })); p.line(pm, col, w); };
+  for (const Lv of [1.5, 2, 3, 4, 5, 6]) if (Math.abs(Lv - L) > 0.25) line(Lv, 'rgba(255,255,255,0.14)', 1.2);
+  line(L, 'rgba(255,213,79,0.85)', 2.5);
+  for (const sg of [1, -1]) { const r = L * Math.cos(b.lamEnd) ** 2; p.dot({ x: r * Math.cos(b.lamEnd), y: sg * r * Math.sin(b.lamEnd) }, b.lost ? C.warn : C.you, 5); }
+  const gp = tr.t * 22, gr = 0.07 * Math.sqrt(1 - Math.min(1, 1 - Math.sin(b.al) ** 2 * gfun(lam)));
+  const tang = V.norm({ x: -Math.sin(lam) * 2 * Math.cos(lam) * -1 - Math.cos(lam) * 0, y: 1 }); // a rough direction across the line
+  const pp = V.add(pos2, V.mul({ x: Math.cos(gp) * 0.05, y: Math.sin(gp) * 0.05 }, 1));
+  p.dot(pp, C.ink, 6);
+  p.text('Earth', { x: 0, y: 0 }, { size: 12, color: 'rgba(255,255,255,0.75)' });
+  p.text('green dots: where it turns back', { x: 0, y: -L * 0.7 }, { size: 11, color: C.you });
+  p.note(b.lost ? 'This angle is too steep: the particle would hit the air and be lost' : 'It spirals along the field line and bounces between the green dots');
+
+  pens[1].begin(); cam.begin();
+  const lat = (la) => { const o = []; for (let k = 0; k <= 48; k++) { const a = (k / 48) * TAU; o.push({ x: Math.cos(la) * Math.cos(a), y: Math.cos(la) * Math.sin(a), z: Math.sin(la) }); } return o; };
+  for (const la of [-60 * DEG, -30 * DEG, 0, 30 * DEG, 60 * DEG]) cam.line(lat(la), la === 0 ? 'rgba(255,213,79,0.5)' : 'rgba(150,190,255,0.35)', 1.2);
+  for (let m = 0; m < 12; m++) { const pts = []; for (let k = 0; k <= 24; k++) { const l = -Math.PI / 2 + (k / 24) * Math.PI; pts.push({ x: Math.cos(l) * Math.cos((m * TAU) / 12), y: Math.cos(l) * Math.sin((m * TAU) / 12), z: Math.sin(l) }); } cam.line(pts, 'rgba(150,190,255,0.2)', 1); }
+  for (let m = 0; m < 8; m++) {
+    const ph = (m * TAU) / 8, pts = [];
+    for (let k = -40; k <= 40; k++) { const l = (k / 40) * b.lamAtm, r = L * Math.cos(l) ** 2; pts.push({ x: r * Math.cos(l) * Math.cos(ph), y: r * Math.cos(l) * Math.sin(ph), z: r * Math.sin(l) }); }
+    cam.line(pts, 'rgba(255,213,79,0.28)', 1.2);
+  }
+  cam.line(trail3, C.ink, 2.4);
+  cam.dot(P3, C.ink, 7);
+  cam.dot({ x: 0, y: 0, z: 0 }, 'rgba(20,54,94,0.9)', 3);
+  cam.text(sgn > 0 ? 'drifts east' : 'drifts west', { x: L * 1.0, y: 0, z: 0 }, { size: 11, color: C.ink, dy: -14 });
+  cam.arrow({ x: 0, y: 0, z: 1.1 }, { x: 0, y: 0, z: 0.6 }, '#fff', 2.5, 'north');
+  pens[1].note('Rotate the view with the mouse');
+
+  app.explain(`${nums([['circles around the field line, radius', fmt.dist(b.gyroR), `every ${tim(b.gyroT)}`], ['bounces from pole to pole', tim(b.bounce)], ['goes once around Earth', tim(b.drift)]])}
+    <p>The field of Earth is a dipole: it is strongest near the poles, where the field lines come together. A charged particle circles a field line, and also runs along it. As it goes toward a pole the field grows, the circle shrinks, and more of its motion goes into the circling, until the motion along the line stops and reverses. The particle is <b>reflected</b>, and it bounces between the two mirror points (green dots). A particle with a small angle to the field reaches farther toward the pole. If it would go below the air, it is lost: the <b>loss cone</b>.</p>
+    <p>The field also gets weaker with distance and the lines bend, and this makes the particle <b>drift</b> around Earth: protons to the west and electrons to the east, so the belts carry a ring of current. The Van Allen belts are made of such trapped particles. In the picture the bounce is a few seconds and the drift half a minute. The true times are in the cards above, and the drift is much slower than the bounce.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'b') drawB(now); else if (m === 'drift') drawDrift(now); else drawBelt(now);
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Angular momentum · Spin</title>
+<meta name="description" content="Angular momentum stays fixed: a skater who pulls in the arms spins faster, a falling cat turns with no angular momentum, and a racket flips when spun about its middle axis." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, V3, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'momentum',
+  sub: 'With no outside torque, angular momentum cannot change. It can only be shared out in different ways.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Start', speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['skater', 'Skater'], ['cat', 'Falling cat'], ['racket', 'Tumbling box']]);
+const is = (m) => (v) => v.mode === m;
+
+// Skater
+ui.slider('arms', { label: 'Arms (and weights) stretched out to', min: 0.25, max: 1, step: 0.01, value: 1, fmt: (v) => `${v.toFixed(2)} m`, show: is('skater') });
+ui.chips([{ text: 'Arms in', set: { arms: 0.25 } }, { text: 'Halfway', set: { arms: 0.6 } }, { text: 'Arms out', set: { arms: 1 } }], { show: is('skater') });
+// Cat
+ui.slider('twist', { label: 'How far the two halves twist apart', min: 30, max: 180, step: 5, value: 120, fmt: (v) => `${v}°`, show: is('cat') });
+ui.slider('tuck', { label: 'Tucked legs against stretched legs (moment of inertia)', min: 0.1, max: 0.8, step: 0.05, value: 0.3, fmt: (v) => `${Math.round(v * 100)}%`, show: is('cat') });
+ui.actions([{ text: 'Drop it upside down again', fn: () => resetCat() }], { show: is('cat') });
+// Box
+ui.seg('axis', [['x', 'Long axis'], ['y', 'Middle axis'], ['z', 'Short axis']], { label: 'Spin it about', show: is('racket') });
+ui.slider('wob', { label: 'Size of the wobble at the start', min: 0.5, max: 10, step: 0.5, value: 3, fmt: (v) => `${v}%`, show: is('racket') });
+ui.slider('w0', { label: 'Spin', min: 0.3, max: 1.2, step: 0.05, value: 0.7, fmt: (v) => `${v.toFixed(2)} turns a second`, show: is('racket') });
+
+function setupMode() {
+  const m = ui.v.mode;
+  tr.go.hidden = m === 'skater';
+  tr.setGo(m === 'cat' ? 'Do one twist' : 'Spin it');
+  tr.loopBox.parentElement.hidden = m === 'skater';
+  const caps = { skater: ['The skater from above', 'What changes as the arms move'], cat: ['The cat, seen from in front of it', 'Turn of each half'], racket: ['Seen from outside, not turning', 'Seen from the box itself'] }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+  tr.reset(); tr.running = m === 'skater';
+  if (m === 'cat') resetCat();
+}
+ui.on((id) => {
+  if (id === 'mode') setupMode();
+  else if (ui.v.mode === 'cat') resetCat();
+  else if (ui.v.mode === 'racket') { tr.reset(); initRacket(); }
+});
+tr.onStart = () => { if (ui.v.mode === 'racket') initRacket(); };
+
+// ---------- Skater ----------
+
+const IB = 0.5, MH = 3; // the body, and each of the two weights
+const inertia = (r) => IB + 2 * MH * r * r;
+const L_SK = inertia(1) * 1.2; // fixed: set by the starting spin of 1.2 rad/s with the arms out
+let rEff = 1, skAngle = 0;
+
+function drawSkater(dt) {
+  rEff += (ui.v.arms - rEff) * Math.min(1, dt * 6);
+  const I = inertia(rEff), w = L_SK / I;
+  skAngle += w * dt;
+  const p = pens[0].begin().box(-1.25, 1.25, -1.25, 1.25, 12);
+  p.circle({ x: 0, y: 0 }, 1, { stroke: 'rgba(255,255,255,0.12)', width: 1, dash: [4, 6] });
+  p.circle({ x: 0, y: 0 }, rEff, { stroke: 'rgba(79,195,247,0.35)', width: 1.5, dash: [3, 5] });
+  const dirA = V.polar(1, skAngle), dirB = V.polar(1, skAngle + Math.PI);
+  for (const d of [dirA, dirB]) { p.line([V.mul(d, 0.18), V.mul(d, rEff)], 'rgba(255,255,255,0.75)', 5); p.circle(V.mul(d, rEff), 0.09, { fill: C.ball, stroke: '#fff', width: 1.5 }); }
+  p.circle({ x: 0, y: 0 }, 0.22, { fill: '#2a3a55', stroke: 'rgba(255,255,255,0.5)', width: 2 });
+  p.dot(V.polar(0.12, skAngle + Math.PI / 2), C.friend, 5);
+  p.arrow(V.mul(dirA, rEff), V.mul(V.polar(1, skAngle + Math.PI / 2), 0.1 + 0.1 * w), C.you, 3, 'speed');
+  // A curved arrow for the turn, longer when the turn is faster.
+  const arc = []; for (let k = 0; k <= 30; k++) arc.push(V.polar(1.12, 0.5 + (k / 30) * Math.min(5.5, 0.35 * w + 0.3)));
+  p.line(arc, C.spin, 3.5);
+  p.note('Pull the arms in and the turn speeds up');
+
+  const q = pens[1].begin();
+  const h = q.ch / 2 - 2;
+  const c1 = q.chart({ x: 6, y: 4, w: q.cw - 12, h }, { x0: 0.25, x1: 1, y0: 0, y1: 10, title: 'Turns a second against arm length (m)', fmtY: (v) => (v / TAU).toFixed(1), yTicks: 4, padB: 22 });
+  const pts = []; for (let r = 0.25; r <= 1.0001; r += 0.01) pts.push({ x: r, y: L_SK / inertia(r) });
+  c1.line(pts, C.ball, 2.5); c1.dot(rEff, w, C.ink, 6);
+  const c2 = q.chart({ x: 6, y: 8 + h, w: q.cw - 12, h }, { x0: 0.25, x1: 1, y0: 0, y1: 40, title: 'Energy of the turn (J) against arm length (m)', yTicks: 4, padB: 22 });
+  const pe = []; for (let r = 0.25; r <= 1.0001; r += 0.01) pe.push({ x: r, y: (L_SK * L_SK) / (2 * inertia(r)) });
+  c2.line(pe, C.friend, 2.5); c2.dot(rEff, (L_SK * L_SK) / (2 * I), C.ink, 6);
+
+  app.explain(`${nums([['moment of inertia, I', I.toFixed(2)], ['turn, ω', `${(w / TAU).toFixed(2)}`, 'turns a second'], ['angular momentum, I × ω', L_SK.toFixed(1)], ['energy', `${(0.5 * I * w * w).toFixed(1)}`, 'J']])}
+    <p>Nothing outside twists the skater, so the angular momentum <b>I × ω</b> cannot change. The moment of inertia I depends on how far the mass is from the axis: it grows with the square of the distance. Pull the weights in and I falls, so ω must rise.</p>
+    <p>The energy of the turn, ½ I ω², goes <b>up</b> as the arms come in. The extra energy comes from the skater's muscles, which pull the arms against the weights' tendency to fly outward.</p>`);
+}
+
+// ---------- Falling cat ----------
+// Two halves, front and back, with no angular momentum in total: I_f ω_f + I_b ω_b = 0. Twisting the halves
+// apart by an angle α turns the light half far and the heavy half little. Do it again with the legs swapped
+// and the net turn does not cancel.
+
+const ease = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const CYCLE = 4.5;
+let cat = null;
+function resetCat() { cat = { f: Math.PI, b: Math.PI, a: 0, clock: 0, hist: [] }; tr.reset(); }
+const alphaAt = (tau, amax) => amax * (ease((tau - 0.5) / 1.5) - ease((tau - 2.5) / 1.5));
+const tuckF = (tau) => ease(tau / 0.5) - ease((tau - 2) / 0.5);
+const tuckB = (tau) => ease((tau - 2) / 0.5) - ease((tau - 4) / 0.5);
+
+function drawCat(dt) {
+  if (!cat) resetCat();
+  const { twist, tuck } = ui.v;
+  const amax = twist * DEG;
+  const inert = (u) => 1 - u * (1 - tuck);
+  const tau = tr.running ? Math.min(CYCLE, tr.t) : (tr.endedAt ? CYCLE : 0);
+  if (tr.running && tr.t >= CYCLE) tr.finish();
+  // Step the twist forward in small pieces, so that the changing inertia is followed closely.
+  const target = alphaAt(tau, amax);
+  const n = 8;
+  if (tr.running || tr.endedAt) {
+    const d = (target - cat.a) / n;
+    for (let i = 0; i < n; i++) {
+      const If = inert(tuckF(tau)), Ib = inert(tuckB(tau));
+      cat.f += (d * Ib) / (If + Ib); cat.b -= (d * If) / (If + Ib);
+    }
+    cat.a = target;
+    cat.clock += dt;
+    cat.hist.push({ t: cat.clock, f: (cat.f - Math.PI) / DEG, b: (cat.b - Math.PI) / DEG, a: cat.a / DEG });
+    if (cat.hist.length > 4000) cat.hist.shift();
+  }
+  const uf = tuckF(tau), ub = tuckB(tau);
+
+  const p = pens[0].begin().box(-1.4, 1.4, -1.5, 1.4, 12);
+  p.line([{ x: -1.4, y: -1.35 }, { x: 1.4, y: -1.35 }], 'rgba(155,231,166,0.7)', 3);
+  p.text('ground: feet should point down', { x: 0, y: -1.35 }, { dy: 14, size: 11, color: 'rgba(155,231,166,0.8)' });
+  const half = (ang, R, u, color, fill) => {
+    const dir = -Math.PI / 2 + ang;
+    const len = R + 0.12 + (1 - u) * 0.55;
+    p.circle({ x: 0, y: 0 }, R, { fill, stroke: color, width: 2.5 });
+    for (const s of [-0.5, 0.5]) {
+      const d = V.polar(1, dir + s);
+      p.line([V.mul(d, R * 0.7), V.mul(d, len)], color, 5);
+      p.dot(V.mul(d, len), color, 5);
+    }
+    p.line([{ x: 0, y: 0 }, V.mul(V.polar(1, dir + Math.PI), R * 0.9)], color, 2, [3, 4]);
+  };
+  half(cat.b, 0.95, ub, C.friend, 'rgba(240,98,146,0.14)');
+  half(cat.f, 0.62, uf, C.ball, 'rgba(79,195,247,0.2)');
+  p.text('back half (pink)', { x: -1.4, y: 1.25 }, { align: 'left', size: 11, color: C.friend });
+  p.text('front half (blue)', { x: -1.4, y: 1.05 }, { align: 'left', size: 11, color: C.ball });
+  const net = (cat.f - Math.PI) / DEG;
+  p.note(net >= 170 && !tr.running ? 'Feet down: it lands on its feet' : tr.running ? (tau < 2.25 ? 'Front legs tucked, back legs stretched: the front half turns far' : 'Legs swapped: the back half turns far, the same way') : 'Press Do one twist');
+
+  const q = pens[1].begin();
+  const t1 = cat.clock, t0 = Math.max(0, t1 - 12);
+  const ymax = Math.max(220, ...cat.hist.map((h) => h.f));
+  const ch = q.chart({ x: 6, y: 4, w: q.cw - 12, h: q.ch - 8 }, { x0: t0, x1: Math.max(t0 + 12, 12), y0: -ymax * 0.15, y1: ymax, title: 'Turn since the drop (degrees) against time (s)', xTicks: 6, yTicks: 5, fmtX: (v) => v.toFixed(0) });
+  ch.hline(180, 'rgba(155,231,166,0.6)'); ch.text('feet down', t0 + 0.2, 192, { color: C.you, base: 'bottom' });
+  const win = cat.hist.filter((h) => h.t >= t0);
+  ch.line(win.map((h) => ({ x: h.t, y: h.b })), C.friend, 2.5);
+  ch.line(win.map((h) => ({ x: h.t, y: h.f })), C.ball, 2.5);
+  ch.line(win.map((h) => ({ x: h.t, y: h.a })), 'rgba(255,255,255,0.45)', 1.5, [4, 4]);
+  ch.text('twist between the halves (dashed)', t0 + 0.2, -ymax * 0.1, { size: 10, color: 'rgba(255,255,255,0.6)' });
+
+  const per = amax / DEG * (1 - tuck) / (1 + tuck);
+  app.explain(`${nums([['turn of the whole cat in one twist', `${per.toFixed(0)}°`], ['twists to reach feet down', `${Math.ceil(180 / Math.max(1, per))}`], ['angular momentum', '0']])}
+    <p>A cat dropped upside down has no spin, so its angular momentum is <b>zero</b>, and it can never get any from the air. Yet it turns over. The trick is that it is not one stiff body. The two halves can turn against each other, and the total angular momentum stays zero: Iᵢ ωᵢ for the front half is cancelled by the back half.</p>
+    <p>First the cat tucks its front legs and stretches its back legs, so the front half has little inertia. When the halves twist apart, the light front half turns far and the heavy back half turns only a little the other way. Then it swaps the legs and untwists: now the light half is the back, and it turns far the same way. The two big turns add. The two small turns also add, and the total is not zero. Cats really bend more than they twist, but this simple model shows that the rule allows it.</p>`);
+}
+
+// ---------- Tumbling box (the tennis racket theorem) ----------
+
+const DIM = { x: 3, y: 2, z: 1 };
+const IN = { x: (DIM.y ** 2 + DIM.z ** 2) / 12, y: (DIM.x ** 2 + DIM.z ** 2) / 12, z: (DIM.x ** 2 + DIM.y ** 2) / 12 };
+const qmul = (a, b) => [a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3], a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2], a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1], a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]];
+function qrot(q, v) {
+  const u = { x: q[1], y: q[2], z: q[3] };
+  const t = V3.mul(V3.cross(u, v), 2);
+  return V3.add(V3.add(v, V3.mul(t, q[0])), V3.cross(u, t));
+}
+const camL = new Spin.Cam3(pens[0], { az: 0.8, el: 0.4, dist: 7, fov: 36, min: 3, max: 14 });
+const camR = new Spin.Cam3(pens[1], { az: 0.8, el: 0.4, dist: 7, fov: 36, min: 3, max: 14 });
+let R = null;
+function initRacket() {
+  const ax = ui.v.axis, w0 = ui.v.w0 * TAU, wob = ui.v.wob / 100 * w0;
+  const e = { x: { x: 1, y: 0, z: 0 }, y: { x: 0, y: 1, z: 0 }, z: { x: 0, y: 0, z: 1 } };
+  const others = ['x', 'y', 'z'].filter((a) => a !== ax);
+  let w = V3.mul(e[ax], w0);
+  w = V3.add(w, V3.add(V3.mul(e[others[0]], wob * 0.8), V3.mul(e[others[1]], wob * 0.6)));
+  // Turn the box so that its angular momentum points up.
+  const Lb = { x: IN.x * w.x, y: IN.y * w.y, z: IN.z * w.z };
+  const up = { x: 0, y: 0, z: 1 }, a = V3.norm(Lb);
+  let axis = V3.cross(a, up); const s = V3.len(axis);
+  const ang = Math.atan2(s, V3.dot(a, up));
+  axis = s > 1e-9 ? V3.mul(axis, 1 / s) : { x: 1, y: 0, z: 0 };
+  const q = [Math.cos(ang / 2), axis.x * Math.sin(ang / 2), axis.y * Math.sin(ang / 2), axis.z * Math.sin(ang / 2)];
+  R = { w, q, trail: [], t: 0, flips: 0, lastSign: Math.sign(w.x * 0 + (ax === 'y' ? w.y : 0)) };
+}
+const eulerRHS = (y) => [((IN.y - IN.z) * y[1] * y[2]) / IN.x, ((IN.z - IN.x) * y[2] * y[0]) / IN.y, ((IN.x - IN.y) * y[0] * y[1]) / IN.z];
+function stepRacket(dt) {
+  const n = Math.max(1, Math.ceil(dt / 0.004)), h = dt / n;
+  for (let i = 0; i < n; i++) {
+    const y = Spin.rk4(eulerRHS, [R.w.x, R.w.y, R.w.z], 0, h);
+    R.w = { x: y[0], y: y[1], z: y[2] };
+    const dq = qmul(R.q, [0, R.w.x, R.w.y, R.w.z]);
+    R.q = R.q.map((c, k) => c + 0.5 * dq[k] * h);
+    const l = Math.hypot(...R.q); R.q = R.q.map((c) => c / l);
+  }
+  R.t += dt;
+}
+const corners = [];
+for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) corners.push({ x: (sx * DIM.x) / 4, y: (sy * DIM.y) / 4, z: (sz * DIM.z) / 4 });
+const FACES = [
+  { ax: 'x', s: 1, col: '255,120,120' }, { ax: 'x', s: -1, col: '255,120,120' }, { ax: 'y', s: 1, col: '130,230,150' },
+  { ax: 'y', s: -1, col: '130,230,150' }, { ax: 'z', s: 1, col: '110,170,255' }, { ax: 'z', s: -1, col: '110,170,255' },
+];
+function boxFaces(tf) {
+  const hx = DIM.x / 4, hy = DIM.y / 4, hz = DIM.z / 4;
+  return FACES.map((f) => {
+    const u = f.ax === 'x' ? ['y', 'z'] : f.ax === 'y' ? ['z', 'x'] : ['x', 'y'];
+    const half = { x: hx, y: hy, z: hz };
+    const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => { const p = { x: 0, y: 0, z: 0 }; p[f.ax] = f.s * half[f.ax]; p[u[0]] = a * half[u[0]]; p[u[1]] = b * half[u[1]]; return tf(p); });
+    return { pts, fill: `rgba(${f.col},0.30)`, stroke: `rgba(${f.col},0.9)`, width: 1.6 };
+  });
+}
+function drawRacket(dt) {
+  if (!R) initRacket();
+  if (tr.running) { stepRacket(dt); if (R.t > 18) tr.finish(); }
+  const Lb = { x: IN.x * R.w.x, y: IN.y * R.w.y, z: IN.z * R.w.z }, Ln = V3.norm(Lb);
+  const wn = V3.len(R.w);
+  R.trail.push(V3.mul(Ln, 1.5)); if (R.trail.length > 900) R.trail.shift();
+
+  // Left: the box tumbles; its angular momentum arrow stays still.
+  pens[0].begin(); camL.begin();
+  camL.faces(boxFaces((p) => qrot(R.q, p)));
+  camL.arrow({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1.7 }, C.spin, 3.5, 'L');
+  camL.arrow({ x: 0, y: 0, z: 0 }, V3.mul(qrot(R.q, V3.norm(R.w)), 1.4), C.ink, 3, 'turning axis');
+  camL.line([{ x: -1.8, y: 0, z: -1 }, { x: 1.8, y: 0, z: -1 }], 'rgba(255,255,255,0.0)', 1);
+  pens[0].note('L stays fixed. The box turns about a moving axis.');
+
+  // Right: the box does not move. L moves around it.
+  pens[1].begin(); camR.begin();
+  camR.faces(boxFaces((p) => p));
+  for (const [ax, col, lab] of [['x', '#ff7878', 'long'], ['y', '#82e696', 'middle'], ['z', '#6eaaff', 'short']]) {
+    const e = { x: 0, y: 0, z: 0 }; e[ax] = 1.25;
+    camR.line([V3.mul(e, -1), e], col, 1.5, [4, 4]);
+    camR.text(lab, e, { size: 10.5, color: col, dy: -6 });
+  }
+  camR.line(R.trail, C.spin, 2.5);
+  camR.arrow({ x: 0, y: 0, z: 0 }, V3.mul(Ln, 1.5), C.spin, 3.5, 'L');
+  camR.arrow({ x: 0, y: 0, z: 0 }, V3.mul(V3.norm(R.w), 1.3), C.ink, 3);
+  pens[1].note('Seen from the box: L wanders over the box');
+
+  const ax = ui.v.axis, o = ['x', 'y', 'z'].filter((a) => a !== ax);
+  const k = (IN[ax] - IN[o[0]]) * (IN[ax] - IN[o[1]]) / (IN[o[0]] * IN[o[1]]);
+  const w0 = ui.v.w0 * TAU, rate = w0 * Math.sqrt(Math.abs(k));
+  const word = ax === 'x' ? 'smallest' : ax === 'z' ? 'largest' : 'middle';
+  app.explain(`${nums([['spin axis', `${ax === 'x' ? 'long' : ax === 'y' ? 'middle' : 'short'}`], ['its moment of inertia is the', word], [k > 0 ? 'small wobble turns at' : 'wobble grows by', k > 0 ? `${(rate / TAU).toFixed(2)}` : `${Math.exp(rate).toFixed(1)}×`, k > 0 ? 'turns a second' : 'each second']])}
+    <p>A box has three axes with three different moments of inertia (smallest along its long edge, largest across its short edge). Throw it spinning about the <b>long</b> or the <b>short</b> axis, and it keeps spinning about it with a small steady wobble. Throw it spinning about the <b>middle</b> axis, and any small wobble grows, and the box <b>flips over</b> again and again. This is the tennis racket theorem.</p>
+    <p>The angular momentum L, the yellow arrow, is fixed in space (left). In the box's own frame (right), L moves, and its tip draws a curve that must keep both L and the energy fixed. Around the long or the short axis this curve is a small loop. Around the middle axis it runs a long way around the box. The same flip is seen with a T-shaped handle turning in the International Space Station.</p>`);
+}
+
+let lastT = performance.now();
+Spin.run((now) => {
+  const real = Math.min(0.1, (now - lastT) / 1000) * tr.speed;
+  lastT = now;
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'skater') drawSkater(tr.dt);
+  else if (m === 'cat') drawCat(tr.running ? tr.dt : 0);
+  else drawRacket(tr.dt);
+});
+setupMode();
+</script>
+</body>
+</html>

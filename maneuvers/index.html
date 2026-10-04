@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Orbital maneuvers · Spin</title>
+<meta name="description" content="Why a burn forward puts a spacecraft behind. Fire an engine in orbit, plan a Hohmann transfer to a higher orbit, and chase a station, seen from the station." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+// Units: Earth's radius is 1, GM is 1. The unit of speed is 7.905 km/s, and the unit of time is 806.8 s.
+const RE = 6371, VU = 7.905, TU = 806.8, R0 = 1.07;
+const alt = (r) => Math.round((r - 1) * RE).toLocaleString('en-US');
+
+const app = Spin.app({
+  slug: 'maneuvers',
+  sub: 'In orbit, speeding up does not move you ahead. It lifts you to a higher path, where you go slower.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', speed: { min: 0.2, max: 6, value: 1, step: 0.1 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['burn', 'Fire an engine'], ['xfer', 'Transfer orbit'], ['chase', 'Chase a station']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.pick('dir', [['pro', 'Forward'], ['retro', 'Backward'], ['out', 'Away from Earth'], ['in', 'Toward Earth']], { label: 'Point the engine', show: is('burn') });
+ui.slider('dv', { label: 'Size of the burn', min: 0.01, max: 0.35, step: 0.005, value: 0.1, fmt: (v) => `${(v * VU * 1000).toFixed(0)} m/s`, show: is('burn') });
+ui.actions([{ text: 'Fire the engine', fn: () => fire() }, { text: 'Back to the circle', fn: () => resetBurn() }], { show: is('burn') });
+ui.slider('r2', { label: 'Target orbit, distance from Earth’s center', min: 1.3, max: 7, step: 0.01, value: 6.62, fmt: (v) => `${v.toFixed(2)} (height ${alt(v)} km)`, show: is('xfer') });
+ui.chips([{ text: 'A higher orbit 1.5', set: { r2: 1.5 } }, { text: 'GPS 4.2', set: { r2: 4.17 } }, { text: 'Geostationary 6.62', set: { r2: 6.62 } }], { show: is('xfer') });
+ui.check('second', 'Do the second burn at the top', true, { show: is('xfer') });
+ui.seg('cdir', [['pro', 'Forward'], ['retro', 'Backward']], { label: 'The chaser fires its engine', show: is('chase') });
+ui.slider('cdv', { label: 'Size of the burn', min: 0.002, max: 0.03, step: 0.001, value: 0.01, fmt: (v) => `${(v * VU * 1000).toFixed(0)} m/s`, show: is('chase') });
+ui.slider('gap', { label: 'The chaser starts behind the station by', min: 2, max: 40, step: 1, value: 10, fmt: (v) => `${v}° (${(v * DEG * R0 * RE).toFixed(0)} km)`, show: is('chase') });
+
+ui.on((id) => { if (id === 'mode') setup(); resetAll(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo(m === 'burn' ? 'Back to the circle' : m === 'xfer' ? 'Start the transfer' : 'Fire and watch');
+  tr.loopBox.parentElement.hidden = m === 'burn';
+  const caps = { burn: ['The orbit (not to scale)', 'Speed against distance'], xfer: ['Seen from above Earth’s north pole', 'Speed against time'], chase: ['Seen from space, not turning', 'Seen from the station: it stays still'] }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+
+// ---------- The physics ----------
+
+const accel = (y) => { const r3 = Math.hypot(y[0], y[1]) ** 3; return [y[2], y[3], -y[0] / r3, -y[1] / r3]; };
+function propagate(y, t) { // step by t using fine steps
+  const n = Math.max(1, Math.ceil(t / 0.01)); const h = t / n;
+  for (let i = 0; i < n; i++) y = Spin.rk4(accel, y, 0, h);
+  return y;
+}
+function elements(y) {
+  const [x, yy, vx, vy] = y, r = Math.hypot(x, yy), v2 = vx * vx + vy * vy;
+  const h = x * vy - yy * vx, eps = v2 / 2 - 1 / r;
+  const ev = { x: (v2 - 1 / r) * x - (x * vx + yy * vy) * vx, y: (v2 - 1 / r) * yy - (x * vx + yy * vy) * vy };
+  const e = Math.hypot(ev.x, ev.y), a = eps < 0 ? -1 / (2 * eps) : Infinity;
+  return { r, v: Math.sqrt(v2), h, eps, e, a, w: Math.atan2(ev.y, ev.x), rp: eps < 0 ? a * (1 - e) : (h * h) / (1 + e), ra: eps < 0 ? a * (1 + e) : Infinity, p: h * h };
+}
+function conic(el, n = 240) {
+  const pts = [];
+  for (let k = 0; k <= n; k++) {
+    const nu = el.e >= 1 ? -Math.acos(-1 / el.e) * 0.95 + (k / n) * 2 * Math.acos(-1 / el.e) * 0.95 : (k / n) * TAU;
+    const r = el.p / (1 + el.e * Math.cos(nu));
+    if (r > 0 && r < 12) pts.push(V.polar(r, el.w + nu));
+  }
+  return pts;
+}
+const burnVec = (y, dir, dv) => {
+  const r = Math.hypot(y[0], y[1]), v = Math.hypot(y[2], y[3]);
+  const t = { x: y[2] / v, y: y[3] / v }, o = { x: y[0] / r, y: y[1] / r };
+  const d = dir === 'pro' ? t : dir === 'retro' ? V.mul(t, -1) : dir === 'out' ? o : V.mul(o, -1);
+  return V.mul(d, dv);
+};
+
+// ---------- Fire an engine ----------
+
+let B = null;
+function resetBurn() { B = { y: [R0, 0, 0, 1 / Math.sqrt(R0)], t: 0, trail: [], used: 0, crashed: false, flash: 0, dir: 'pro' }; }
+function fire() {
+  if (ui.v.mode !== 'burn') return;
+  if (!B) resetBurn();
+  if (B.crashed) return;
+  const dv = burnVec(B.y, ui.v.dir, ui.v.dv);
+  B.y[2] += dv.x; B.y[3] += dv.y; B.used += ui.v.dv; B.flash = 1; B.dir = ui.v.dir; B.fireVec = dv;
+}
+function drawBurn() {
+  if (!B) resetBurn();
+  if (!B.crashed && tr.dt > 0) {
+    B.y = propagate(B.y, tr.dt * 1.0); B.t += tr.dt;
+    B.trail.push({ x: B.y[0], y: B.y[1] }); if (B.trail.length > 900) B.trail.shift();
+    if (Math.hypot(B.y[0], B.y[1]) <= 1) B.crashed = true;
+  }
+  B.flash = Math.max(0, B.flash - tr.dt * 1.5);
+  const el = elements(B.y);
+  const ext = Math.min(8, Math.max(1.8, (isFinite(el.ra) ? el.ra : 6) * 1.12));
+  const p = pens[0].begin().box(-ext, ext, -ext, ext, 8);
+  p.circle({ x: 0, y: 0 }, 1, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  p.circle({ x: 0, y: 0 }, R0, { stroke: 'rgba(155,231,166,0.3)', width: 1.2, dash: [4, 5] });
+  if (!B.crashed) p.line(conic(el), 'rgba(255,162,74,0.55)', 1.6, [5, 5]);
+  p.line(B.trail, C.ink, 2.4);
+  const pos = { x: B.y[0], y: B.y[1] };
+  if (B.flash > 0 && B.fireVec) p.arrow(pos, V.mul(V.norm(B.fireVec), -Math.max(0.1, ext * 0.12) * B.flash), C.friend, 4);
+  p.dot(pos, B.crashed ? C.warn : '#fff', 6);
+  if (B.crashed) p.text('× it hit the air', pos, { size: 12, color: C.warn, dy: -14 });
+  if (!B.crashed && el.eps < 0) {
+    const a = V.polar(el.ra, el.w + Math.PI), b = V.polar(el.rp, el.w);
+    p.dot(a, C.you, 4); p.text('highest', a, { dy: -12, size: 10.5, color: C.you });
+    p.dot(b, C.you, 4); p.text('lowest', b, { dy: 14, size: 10.5, color: C.you });
+  }
+  p.note(B.crashed ? 'The lowest point is inside Earth: the orbit ends in the air' : 'Fire the engine, then watch the new orbit (dashed orange)');
+
+  const q = pens[1].begin();
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 1, x1: 4, y0: 0, y1: 11.5, title: 'Speed (km/s) against distance from the center of Earth', xTicks: 6, yTicks: 5, xTitle: 'distance (Earth radii)', fmtX: (v) => v.toFixed(1) });
+  const vc = [], ve = []; for (let r = 1; r <= 4.001; r += 0.02) { vc.push({ x: r, y: VU / Math.sqrt(r) }); ve.push({ x: r, y: (VU * Math.SQRT2) / Math.sqrt(r) }); }
+  ch.line(ve, 'rgba(255,255,255,0.3)', 1.5, [5, 4]); ch.text('escape', 3.9, (VU * Math.SQRT2) / Math.sqrt(3.9), { align: 'right', dy: -9, size: 10.5, color: 'rgba(255,255,255,0.5)' });
+  ch.line(vc, C.you, 2.6); ch.text('circular orbit', 3.9, VU / Math.sqrt(3.9), { align: 'right', dy: 14, size: 10.5, color: C.you });
+  if (el.eps < 0) { const o = []; for (let r = Math.max(1, el.rp); r <= Math.min(4, el.ra) + 1e-9; r += 0.02) o.push({ x: r, y: VU * Math.sqrt(Math.max(0, 2 / r - 1 / el.a)) }); ch.line(o, C.ink, 3); }
+  ch.dot(Math.min(4, el.r), VU * el.v, '#fff', 6);
+  const per = el.eps < 0 ? `${((TAU * el.a ** 1.5 * TU) / 60).toFixed(0)} min` : 'never returns';
+  app.explain(`${nums([['lowest and highest', el.eps < 0 ? `${alt(el.rp)} and ${alt(el.ra)}` : '–', 'km'], ['one trip takes', per], ['fuel used so far', `${(B.used * VU * 1000).toFixed(0)}`, 'm/s']])}
+    <p>Fire the engine <b>forward</b> and the spacecraft goes faster, so it <b>rises</b>. It was moving at exactly the speed for a circle. Now it has too much speed for that height, and it swings out to a higher point on the other side of Earth. The burn is at the <b>lowest</b> point of the new orbit. At the top it is slow, and slower than a circular orbit up there (the orange curve falls below the green one). It is no longer ahead of where it was, but behind.</p>
+    <p>Fire <b>backward</b> and the burn is at the <b>highest</b> point of the new orbit: it drops lower and goes faster. To go to a higher circular orbit you need <b>two</b> burns. Burns away from or toward Earth tilt the orbit without changing its energy, so the speed there is the same, and the shape changes. Try them.</p>`);
+}
+
+// ---------- Transfer orbit ----------
+
+let X = null;
+function makeTransfer() {
+  const r1 = R0, r2 = ui.v.r2;
+  const a = (r1 + r2) / 2;
+  const v1 = 1 / Math.sqrt(r1), vt1 = Math.sqrt(2 / r1 - 1 / a), vt2 = Math.sqrt(2 / r2 - 1 / a), v2 = 1 / Math.sqrt(r2);
+  const dv1 = vt1 - v1, dv2 = v2 - vt2, th = Math.PI * a ** 1.5;
+  let y = [r1, 0, 0, vt1];
+  const pts = [{ t: 0, y: y.slice(), v: v1 }], events = [{ t: 0, label: `burn 1: ${(dv1 * VU).toFixed(2)} km/s` }];
+  pts.push({ t: 0, y: y.slice(), v: vt1 });
+  let t = 0, second = false;
+  const tmax = ui.v.second ? th + 0.5 * TAU * r2 ** 1.5 : 2 * th + 1;
+  let prevVr = 1;
+  while (t < tmax) {
+    y = Spin.rk4(accel, y, 0, 0.01); t += 0.01;
+    const vr = y[0] * y[2] + y[1] * y[3];
+    if (ui.v.second && !second && prevVr > 0 && vr <= 0) {
+      const r = Math.hypot(y[0], y[1]), tn = { x: -y[1] / r, y: y[0] / r }, vc = 1 / Math.sqrt(r);
+      pts.push({ t, y: y.slice(), v: Math.hypot(y[2], y[3]) });
+      y = [y[0], y[1], tn.x * vc, tn.y * vc]; second = true;
+      events.push({ t, label: `burn 2: ${(dv2 * VU).toFixed(2)} km/s` });
+    }
+    prevVr = vr;
+    pts.push({ t, y: y.slice(), v: Math.hypot(y[2], y[3]) });
+  }
+  return { r1, r2, a, dv1, dv2, th, pts, events, tmax, key: `${ui.v.r2}|${ui.v.second}` };
+}
+function drawXfer() {
+  if (!X || X.key !== `${ui.v.r2}|${ui.v.second}`) X = makeTransfer();
+  const t = tr.t;
+  if (tr.running && t > X.tmax + 0.5) tr.finish();
+  const upto = X.pts.filter((q) => q.t <= Math.min(t, X.tmax));
+  const cur = upto[upto.length - 1];
+  const ext = Math.max(1.8, X.r2 * 1.2);
+  const p = pens[0].begin().box(-ext, ext, -ext, ext, 8);
+  p.circle({ x: 0, y: 0 }, 1, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  p.circle({ x: 0, y: 0 }, X.r1, { stroke: 'rgba(79,195,247,0.45)', width: 1.4, dash: [4, 5] });
+  p.circle({ x: 0, y: 0 }, X.r2, { stroke: 'rgba(155,231,166,0.45)', width: 1.4, dash: [4, 5] });
+  const ell = []; for (let k = 0; k <= 200; k++) { const nu = (k / 200) * TAU, r = (X.a * (1 - ((X.r2 - X.r1) / (X.r1 + X.r2)) ** 2)) / (1 + ((X.r2 - X.r1) / (X.r1 + X.r2)) * Math.cos(nu)); ell.push(V.polar(r, nu + Math.PI)); }
+  p.line(ell.map((q) => ({ x: -q.x, y: -q.y })), 'rgba(255,162,74,0.3)', 1.4, [5, 5]);
+  p.line(upto.filter((_, i) => i % 3 === 0).map((q) => ({ x: q.y[0], y: q.y[1] })), C.ink, 2.6);
+  const pos = { x: cur.y[0], y: cur.y[1] };
+  p.dot(pos, '#fff', 6);
+  for (const ev of X.events) if (t >= ev.t && t - ev.t < 1.5) { const q = X.pts.find((z) => z.t >= ev.t); const pp = { x: q.y[0], y: q.y[1] }; p.circle(pp, 0.18 * (1 + (t - ev.t)), { stroke: `rgba(240,98,146,${1 - (t - ev.t) / 1.5})`, width: 3 }); p.text(ev.label, pp, { dy: -26, size: 11.5, color: C.friend }); }
+  p.note(t < 0.05 ? 'On the low circle. Press Start the transfer.' : 'Burn forward, coast to the top, burn forward again');
+
+  const q = pens[1].begin();
+  const hMax = (X.tmax * TU) / 3600;
+  const ch = q.chart({ x: 4, y: 2, w: q.cw - 8, h: q.ch - 6 }, { x0: 0, x1: hMax, y0: 0, y1: 10, title: 'Speed (km/s) against time (hours)', xTicks: 6, yTicks: 5, fmtX: (v) => v.toFixed(1), xTitle: 'time (hours)' });
+  ch.line(X.pts.filter((_, i) => i % 4 === 0).map((z) => ({ x: (z.t * TU) / 3600, y: z.v * VU })), 'rgba(255,255,255,0.25)', 2);
+  ch.line(upto.filter((_, i) => i % 4 === 0).map((z) => ({ x: (z.t * TU) / 3600, y: z.v * VU })), C.ink, 3);
+  ch.dot((cur.t * TU) / 3600, cur.v * VU, '#fff', 5.5);
+  const total = X.dv1 + X.dv2;
+  app.explain(`${nums([['first burn', `${(X.dv1 * VU).toFixed(2)}`, 'km/s'], ['second burn', ui.v.second ? `${(X.dv2 * VU).toFixed(2)}` : 'skipped', ui.v.second ? 'km/s' : ''], ['coast to the top', `${((X.th * TU) / 3600).toFixed(1)}`, 'hours'], ['total', `${(total * VU).toFixed(2)}`, 'km/s']])}
+    <p>This is the <b>Hohmann transfer</b>, the cheapest two-burn way to go from one circular orbit to another. The first burn, forward, raises the orbit so that its highest point just touches the target circle. The craft coasts half way around, slowing as it climbs. At the top it is slower than a circular orbit there, so a <b>second burn</b>, also forward, makes the orbit a circle.</p>
+    <p>Notice that the speed on the high circle is <b>lower</b> than on the low one, even though both burns were forward. The burns added speed, and the climb took away more. Turn off the second burn, and the craft just falls back down to where it began. Geostationary satellites are reached this way: about 3.9 km/s in total, and 5 hours of coasting.</p>`);
+}
+
+// ---------- Chase ----------
+
+let K = null;
+function makeChase() {
+  const gap = ui.v.gap * DEG, dv = ui.v.cdv * (ui.v.cdir === 'pro' ? 1 : -1), v0 = 1 / Math.sqrt(R0);
+  const w0 = 1 / R0 ** 1.5;
+  // The station is on the +y axis at the start, moving counterclockwise. The chaser is behind it by `gap`.
+  const th0 = Math.PI / 2;
+  const chase0 = [R0 * Math.cos(th0 - gap), R0 * Math.sin(th0 - gap), -Math.sin(th0 - gap) * (v0 + dv), Math.cos(th0 - gap) * (v0 + dv)];
+  const tmax = TAU * R0 ** 1.5 * 4;
+  const pts = []; let y = chase0.slice(), t = 0;
+  const rel = (yy, tt) => {
+    const th = th0 + w0 * tt, ang = Math.PI / 2 - th;
+    const c = V.rot({ x: yy[0], y: yy[1] }, ang);
+    return { x: (c.x) * RE, y: (c.y - R0) * RE };
+  };
+  while (t <= tmax) { pts.push({ t, y: y.slice(), rel: rel(y, t), tp: V.polar(R0, th0 + w0 * t) }); y = Spin.rk4(accel, y, 0, 0.02); t += 0.02; }
+  let best = pts.reduce((b, q) => (Math.hypot(q.rel.x, q.rel.y) < Math.hypot(b.rel.x, b.rel.y) ? q : b), pts[0]);
+  return { pts, tmax, best, key: `${ui.v.gap}|${ui.v.cdv}|${ui.v.cdir}`, w0 };
+}
+function drawChase() {
+  if (!K || K.key !== `${ui.v.gap}|${ui.v.cdv}|${ui.v.cdir}`) K = makeChase();
+  const t = tr.t;
+  if (tr.running && t > K.tmax + 0.5) tr.finish();
+  const idx = Math.min(K.pts.length - 1, Math.floor(Math.min(t, K.tmax) / 0.02));
+  const cur = K.pts[idx];
+  const upto = K.pts.slice(0, idx + 1);
+  const p = pens[0].begin().box(-1.6, 1.6, -1.6, 1.6, 8);
+  p.circle({ x: 0, y: 0 }, 1, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  p.circle({ x: 0, y: 0 }, R0, { stroke: 'rgba(155,231,166,0.3)', width: 1.2, dash: [4, 5] });
+  p.line(upto.filter((_, i) => i % 3 === 0).map((q) => ({ x: q.y[0], y: q.y[1] })), C.ink, 2.4);
+  p.circle(cur.tp, 0.05, { fill: C.you, stroke: '#fff', width: 2 });
+  p.text('station', cur.tp, { dy: -14, size: 11, color: C.you });
+  p.dot({ x: cur.y[0], y: cur.y[1] }, C.ink, 6);
+  p.text('chaser', { x: cur.y[0], y: cur.y[1] }, { dy: 14, size: 11, color: C.ink });
+  p.note('Both go around Earth. The chaser is on a slightly different orbit.');
+
+  const all = K.pts.map((q) => q.rel);
+  const ex = Math.max(400, ...all.map((q) => Math.abs(q.x))) * 1.12, ey = Math.max(60, ...all.map((q) => Math.abs(q.y))) * 1.4;
+  const R = pens[1].begin();
+  R.box(-ex, ex, -ey * 2.2, ey * 2.2, 14);
+  R.line([{ x: -ex, y: 0 }, { x: ex, y: 0 }], 'rgba(255,255,255,0.1)', 1, [4, 5]);
+  R.line(all, 'rgba(255,162,74,0.22)', 1.5, [4, 5]);
+  R.line(upto.filter((_, i) => i % 3 === 0).map((q) => q.rel), C.ink, 3);
+  R.circle({ x: 0, y: 0 }, ex * 0.012, { fill: C.you, stroke: '#fff', width: 2 });
+  R.text('station', { x: 0, y: 0 }, { dy: -16, size: 11.5, color: C.you });
+  R.dot(cur.rel, C.ink, 6.5);
+  R.arrow({ x: ex * 0.5, y: -ey * 1.8 }, { x: ex * 0.35, y: 0 }, 'rgba(255,255,255,0.5)', 2, 'forward');
+  R.arrow({ x: -ex * 0.9, y: -ey * 0.4 }, { x: 0, y: ey * 0.8 }, 'rgba(255,255,255,0.5)', 2, 'up');
+  R.note('Across (km): ahead is right. Up is away from Earth. The vertical scale is stretched.');
+  const gapNow = Math.hypot(cur.rel.x, cur.rel.y), minGap = Math.hypot(K.best.rel.x, K.best.rel.y);
+  const caught = minGap < 60;
+  const fwd = ui.v.cdir === 'pro';
+  app.explain(`${nums([['distance now', `${gapNow.toFixed(0)}`, 'km'], ['closest in four trips', `${minGap.toFixed(0)}`, `km, at trip ${(K.best.t / (TAU * R0 ** 1.5)).toFixed(1)}`], ['result', caught ? 'catches up' : 'does not catch up']])}
+    <p>The chaser is behind the station, and wants to catch it. The obvious idea is to fire forward. Look at the right view, from the station: a <b>forward</b> burn lifts the chaser to a higher orbit, where it goes slower, so it <b>falls behind</b> even more, in a long curve. A <b>backward</b> burn drops it to a lower orbit, where it goes faster, so it gains on the station. After the burn the chaser gets ahead, and it must then raise itself again.</p>
+    <p>This path is the Coriolis effect in orbit: in the frame of the station (turning once per trip), the chaser is pushed off to the side of its motion. It is the reason space-station crews plan their approach many trips ahead. ${fwd ? 'Here, a forward burn: it falls behind.' : 'Here, a backward burn: it gains.'}</p>`);
+}
+
+function resetAll() { B = null; X = null; K = null; }
+tr.onStart = () => { if (ui.v.mode === 'burn') resetBurn(); else { X = null; K = null; } };
+function draw(now) {
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'burn') drawBurn(); else if (m === 'xfer') drawXfer(); else drawChase();
+}
+setup(); resetBurn(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

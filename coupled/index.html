@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Coupled oscillators · Spin</title>
+<meta name="description" content="Two pendulums joined by a spring pass energy back and forth. Their normal modes explain the beats. A chain of masses has as many modes as it has masses." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'coupled',
+  sub: 'Joined oscillators do not swing on their own. They share a few patterns of motion, the normal modes, each with its own rhythm.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', loop: false, speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['pair', 'Two pendulums'], ['chain', 'Chain of masses']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.seg('start', [['pull', 'Pull one aside'], ['same', 'Both together'], ['opp', 'Opposite ways']], { label: 'Start', show: is('pair') });
+ui.slider('eps', { label: 'Strength of the spring between them', min: 0.03, max: 0.6, step: 0.01, value: 0.25, fmt: (v) => v.toFixed(2), show: is('pair'), hint: 'Compared with the pull of gravity on the pendulum.' });
+ui.slider('n', { label: 'Number of masses', min: 3, max: 14, step: 1, value: 8, fmt: (v) => String(v), show: is('chain') });
+ui.seg('cstart', [['mode', 'One mode'], ['pluck', 'Pluck one mass']], { label: 'Start', show: is('chain') });
+ui.slider('k', { label: 'Which mode', min: 1, max: 14, step: 1, value: 2, fmt: (v) => String(Math.min(v, ui.v.n)), show: (v) => v.mode === 'chain' && v.cstart === 'mode' });
+ui.slider('which', { label: 'Which mass', min: 1, max: 14, step: 1, value: 3, fmt: (v) => String(Math.min(v, ui.v.n)), show: (v) => v.mode === 'chain' && v.cstart === 'pluck' });
+
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  app.caption(0, m === 'pair' ? 'The pendulums' : 'The masses and springs');
+  app.caption(1, m === 'pair' ? 'Swing of each, and where the energy is' : 'Which modes are present, and their rhythms');
+}
+
+const W0 = Math.PI; // one swing in 2 seconds
+
+// ---------- Two pendulums ----------
+
+function pair(t) {
+  const { start, eps } = ui.v;
+  const wa = W0, wb = W0 * Math.sqrt(1 + 2 * eps);
+  const [A, B] = start === 'pull' ? [0.5, 0.5] : start === 'same' ? [1, 0] : [0, 1];
+  const x1 = A * Math.cos(wa * t) + B * Math.cos(wb * t), x2 = A * Math.cos(wa * t) - B * Math.cos(wb * t);
+  const v1 = -A * wa * Math.sin(wa * t) - B * wb * Math.sin(wb * t), v2 = -A * wa * Math.sin(wa * t) + B * wb * Math.sin(wb * t);
+  return { x1, x2, v1, v2, wa, wb, A, B };
+}
+function drawPair(t) {
+  const s = pair(t), { eps } = ui.v;
+  const p = pens[0].begin().box(-2.6, 2.6, -0.4, 2.8, 8);
+  const L = 2.0, pivots = [{ x: -1.2, y: 2.5 }, { x: 1.2, y: 2.5 }];
+  p.line([{ x: -2.2, y: 2.5 }, { x: 2.2, y: 2.5 }], 'rgba(255,255,255,0.7)', 5);
+  const th = [s.x1, s.x2].map((x) => x * 0.32);
+  const at = (i, f) => V.add(pivots[i], V.mul({ x: Math.sin(th[i]), y: -Math.cos(th[i]) }, L * f));
+  const a = at(0, 0.62), b = at(1, 0.62);
+  const sp = [a], nz = 14, d = V.sub(b, a), nrm = V.norm({ x: -d.y, y: d.x });
+  for (let k = 0; k < nz; k++) sp.push(V.add(V.add(a, V.mul(d, (k + 0.5) / nz)), V.mul(nrm, k % 2 ? 0.13 : -0.13)));
+  sp.push(b);
+  p.line(sp, C.ink, 2.5);
+  [C.ball, C.friend].forEach((c, i) => { p.line([pivots[i], at(i, 1)], 'rgba(255,255,255,0.8)', 3); p.circle(at(i, 1), 0.22, { fill: c, stroke: '#fff', width: 2 }); });
+  p.note(eps < 0.1 ? 'A weak spring: energy moves slowly' : 'The spring carries energy from one to the other');
+
+  const q = pens[1].begin();
+  const hh = q.ch / 2 - 6;
+  const t1 = Math.max(24, t), t0 = t1 - 24;
+  const c1 = q.chart({ x: 4, y: 2, w: q.cw - 8, h: hh }, { x0: t0, x1: t1, y0: -1.1, y1: 1.1, title: 'Swing of the left (blue) and right (pink) pendulum against time (s)', xTicks: 6, yTicks: 4, fmtX: (v) => v.toFixed(0), padB: 20 });
+  const a1 = [], a2 = [], e1 = [], e2 = [];
+  for (let u = Math.max(0, t0); u <= t + 1e-9; u += 0.08) {
+    const z = pair(u);
+    a1.push({ x: u, y: z.x1 }); a2.push({ x: u, y: z.x2 });
+    e1.push({ x: u, y: 0.5 * z.x1 ** 2 + 0.5 * (z.v1 / W0) ** 2 }); e2.push({ x: u, y: 0.5 * z.x2 ** 2 + 0.5 * (z.v2 / W0) ** 2 });
+  }
+  c1.line(a1, C.ball, 2); c1.line(a2, C.friend, 2);
+  const c2 = q.chart({ x: 4, y: hh + 8, w: q.cw - 8, h: hh }, { x0: t0, x1: t1, y0: 0, y1: 1.1, title: 'Energy of each pendulum (with the spring’s share left out)', xTicks: 6, yTicks: 3, fmtX: (v) => v.toFixed(0), padB: 20 });
+  c2.area(e1, 'rgba(79,195,247,0.25)'); c2.area(e2, 'rgba(240,98,146,0.25)');
+  c2.line(e1, C.ball, 2); c2.line(e2, C.friend, 2);
+  const beat = (TAU / (s.wb - s.wa));
+  app.explain(`${nums([['in-phase mode', `${(s.wa / TAU).toFixed(2)}`, 'swings a second'], ['opposite mode', `${(s.wb / TAU).toFixed(2)}`, 'swings a second'], ['energy returns every', `${beat.toFixed(1)}`, 's']])}
+    <p>Two ways of swinging are simple. If both pendulums swing <b>together</b>, the spring is never stretched, and they swing at their own rhythm. If they swing <b>opposite ways</b>, the spring is stretched and squeezed, which adds to the pull, so this mode is faster. These are the <b>normal modes</b>. Each keeps its own steady rhythm.</p>
+    <p>Pulling one pendulum aside and letting go starts <b>both modes at once</b>, with equal size. They drift in and out of step, so the motion of each pendulum swells and fades: <b>beats</b>. Where the two modes add on the left, they cancel on the right, and the energy goes back and forth. A stronger spring splits the two rhythms more, so the energy moves faster.</p>`);
+}
+
+// ---------- A chain of masses ----------
+
+function chain(t) {
+  const N = ui.v.n, wS = W0;
+  const kk = Math.min(ui.v.k, N), wh = Math.min(ui.v.which, N);
+  const x0 = []; for (let j = 1; j <= N; j++) x0.push(ui.v.cstart === 'mode' ? Math.sin((kk * Math.PI * j) / (N + 1)) : (j === wh ? 1 : 0));
+  const An = [], om = [];
+  for (let n = 1; n <= N; n++) {
+    let s = 0; for (let j = 1; j <= N; j++) s += x0[j - 1] * Math.sin((n * Math.PI * j) / (N + 1));
+    An.push((2 / (N + 1)) * s); om.push(2 * wS * Math.sin((n * Math.PI) / (2 * (N + 1))));
+  }
+  const x = []; for (let j = 1; j <= N; j++) { let s = 0; for (let n = 1; n <= N; n++) s += An[n - 1] * Math.sin((n * Math.PI * j) / (N + 1)) * Math.cos(om[n - 1] * t); x.push(s); }
+  return { N, An, om, x };
+}
+function drawChain(t) {
+  const s = chain(t), N = s.N;
+  const p = pens[0].begin().box(-0.6, N + 1.6, -2.2, 2.2, 12);
+  const sc = 1.6 / Math.max(1, ...s.An.map(Math.abs).map((a, i, arr) => Math.abs(a)), 1) * 1;
+  const pts = [{ x: 0, y: 0 }]; s.x.forEach((v, j) => pts.push({ x: j + 1, y: v * sc * 0.9 })); pts.push({ x: N + 1, y: 0 });
+  p.line([{ x: 0, y: -1.8 }, { x: 0, y: 1.8 }], 'rgba(255,255,255,0.7)', 5);
+  p.line([{ x: N + 1, y: -1.8 }, { x: N + 1, y: 1.8 }], 'rgba(255,255,255,0.7)', 5);
+  p.line([{ x: 0, y: 0 }, { x: N + 1, y: 0 }], 'rgba(255,255,255,0.12)', 1, [4, 5]);
+  p.line(pts, C.ink, 2.5);
+  pts.slice(1, -1).forEach((q) => p.circle(q, 0.2, { fill: C.ball, stroke: '#fff', width: 1.5 }));
+  p.note('Each mass moves up and down; the springs join neighbors');
+
+  const q = pens[1].begin();
+  const hh = q.ch / 2 - 6;
+  const c1 = q.chart({ x: 4, y: 2, w: q.cw - 8, h: hh }, { x0: 0.4, x1: N + 0.6, y0: -1.1, y1: 1.1, title: 'How much of each mode is present', xTicks: Math.min(N, 14), yTicks: 4, fmtX: (v) => (Number.isInteger(v) ? v : ''), padB: 20 });
+  c1.bars(s.An.map((a, i) => ({ x: i + 1, y: a, color: a >= 0 ? C.ball : C.friend })), 0.6);
+  c1.hline(0, 'rgba(255,255,255,0.4)', [1, 0]);
+  const c2 = q.chart({ x: 4, y: hh + 8, w: q.cw - 8, h: hh }, { x0: 0.4, x1: N + 0.6, y0: 0, y1: 2.2, title: 'Rhythm of each mode (swings a second)', xTicks: Math.min(N, 14), yTicks: 4, fmtX: (v) => (Number.isInteger(v) ? v : ''), fmtY: (v) => v.toFixed(1), padB: 20 });
+  const curve = []; for (let n = 0.4; n <= N + 0.6; n += 0.05) curve.push({ x: n, y: (2 * W0 * Math.sin((n * Math.PI) / (2 * (N + 1)))) / TAU });
+  c2.line(curve, 'rgba(255,255,255,0.3)', 1.5);
+  s.om.forEach((w, i) => c2.dot(i + 1, w / TAU, Math.abs(s.An[i]) > 0.02 ? C.ink : 'rgba(255,255,255,0.4)', Math.abs(s.An[i]) > 0.02 ? 6 : 3.5));
+  const dom = s.An.reduce((b, a, i) => (Math.abs(a) > Math.abs(s.An[b]) ? i : b), 0);
+  app.explain(`${nums([['masses', String(N)], ['modes', String(N)], ['slowest mode', `${(s.om[0] / TAU).toFixed(2)}`, 'swings a second'], ['fastest mode', `${(s.om[N - 1] / TAU).toFixed(2)}`, 'swings a second']])}
+    <p>A chain of ${N} masses has <b>${N} normal modes</b>. In mode n, every mass swings at the same rhythm, and the pattern of heights is a sine wave with n half-waves along the chain. Start in one mode and it stays in that mode. Start with <b>one mass pulled aside</b>, and all the modes are present at once; the bars show how much of each. They fall out of step, and the pulse spreads along the chain and comes back from the ends.</p>
+    <p>With more and more masses, the chain becomes a string, and the modes become the harmonics of the string. The rhythms rise in step with n at first, then level off (the curve below): a chain cannot carry a wave shorter than twice the spacing of its masses.${ui.v.cstart === 'mode' ? '' : ` Mode ${dom + 1} is the largest here.`}</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  if (ui.v.mode === 'pair') drawPair(tr.t); else drawChain(tr.t);
+}
+setup();
+tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Rolling wheels · Spin</title>
+<meta name="description" content="A wheel that rolls without slipping. A point on it draws a cycloid, the contact point is at rest, and every point turns about the contact point." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums } = Spin;
+
+// One turn takes 2π seconds: the wheel turns at 1 radian a second and has radius 1.
+// vr is the travel speed against the rim speed: 1 is rolling without slipping.
+const TURNS = 2;
+const T_END = TURNS * 2 * Math.PI;
+
+const app = Spin.app({
+  slug: 'rolling',
+  sub: 'The same wheel seen from the ground (top) and from its hub (bottom).',
+  views: [{ caption: 'Seen from the ground' }, { caption: 'Seen from the hub of the wheel' }],
+  cols: 1, rows: 'minmax(0, 1fr) minmax(0, 1fr)',
+  go: 'Roll', speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+
+ui.slider('r', {
+  label: 'Point you follow', min: 0, max: 1.5, step: 0.05, value: 1,
+  fmt: (v) => (v === 0 ? 'the hub' : v < 1 ? `${v.toFixed(2)} of the way to the rim` : v === 1 ? 'on the rim' : `${v.toFixed(2)}: beyond the rim`),
+});
+ui.chips([{ text: 'Hub', set: { r: 0 } }, { text: 'Halfway', set: { r: 0.5 } }, { text: 'Rim', set: { r: 1 } }, { text: 'Train flange', set: { r: 1.25 } }]);
+ui.slider('vr', {
+  label: 'Travel speed against rim speed', min: 0, max: 2, step: 0.05, value: 1,
+  fmt: (v) => (v === 1 ? 'equal: no slipping' : v < 1 ? `${v.toFixed(2)}: wheelspin` : `${v.toFixed(2)}: skidding`),
+});
+ui.chips([{ text: 'Rolling', set: { vr: 1 } }, { text: 'Spinning in place', set: { vr: 0 } }, { text: 'Wheelspin', set: { vr: 0.5 } }, { text: 'Skidding', set: { vr: 1.5 } }]);
+ui.check('rim', 'Show the velocity of eight points on the rim', false);
+ui.check('construct', 'Show the turning point (the center the wheel turns about now)', true);
+app.credit('Speeds are drawn as arrows. The wheel turns at 1 radian a second and has radius 1.');
+
+ui.on(() => tr.restart());
+
+/** Everything about the followed point at time t. */
+function at(t) {
+  const { r, vr } = ui.v;
+  const phi = -Math.PI / 2 - t;
+  const hub = { x: vr * t, y: 1 };
+  const rel = V.polar(r, phi);
+  return { phi, hub, rel, p: V.add(hub, rel), vel: { x: vr + r * Math.sin(phi), y: -r * Math.cos(phi) } };
+}
+
+function wheel(pen, hub, th) {
+  pen.circle(hub, 1, { fill: '#1b2638', stroke: 'rgba(255,255,255,0.35)', width: 2 });
+  for (let k = 0; k < 8; k++) {
+    const a = th + (k * Math.PI) / 4;
+    pen.line([hub, V.add(hub, V.polar(1, a))], 'rgba(255,255,255,0.14)', 1.5);
+  }
+}
+
+function draw(now) {
+  tr.step(now);
+  const { r, vr } = ui.v;
+  const t = Math.min(tr.t, T_END);
+  if (tr.t >= T_END + 1.2) tr.finish();
+  const cur = at(t);
+  const k = 0.7; // arrow length for a speed of 1
+
+  // Top: the ground does not move.
+  const g = pens[0].begin();
+  const xmax = Math.max(8, TURNS * 2 * Math.PI * vr + 2.5);
+  g.box(-2, xmax, -0.5, 3.0, 14);
+  g.line([{ x: -2, y: 0 }, { x: xmax, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  for (let x = Math.ceil(-2); x < xmax; x++) g.line([{ x, y: 0 }, { x: x - 0.12, y: -0.14 }], 'rgba(155,231,166,0.35)', 1.2);
+  const ghost = [], trace = [];
+  for (let s = 0; s <= T_END + 1e-9; s += 0.05) { ghost.push(at(s).p); if (s <= t) trace.push(at(s).p); }
+  g.line(ghost, 'rgba(255,162,74,0.22)', 1.5, [4, 6]);
+  wheel(g, cur.hub, -t);
+  g.line(trace, C.ink, 3.2);
+  if (ui.v.rim) {
+    for (let j = 0; j < 8; j++) {
+      const phi = -Math.PI / 2 + (j * Math.PI) / 4 - t;
+      const p = V.add(cur.hub, V.polar(1, phi));
+      g.arrow(p, V.mul({ x: vr + Math.sin(phi), y: -Math.cos(phi) }, k), C.ball, 2);
+      g.dot(p, C.ball, 3);
+    }
+  }
+  g.arrow(cur.hub, V.mul({ x: vr, y: 0 }, k), C.you, 3, 'hub');
+  if (ui.v.construct) {
+    const ic = { x: cur.hub.x, y: 1 - vr };
+    g.line([ic, cur.p], 'rgba(255,255,255,0.5)', 1.3, [5, 5]);
+    g.line([{ x: ic.x - 0.12, y: ic.y - 0.12 }, { x: ic.x + 0.12, y: ic.y + 0.12 }], '#fff', 2);
+    g.line([{ x: ic.x - 0.12, y: ic.y + 0.12 }, { x: ic.x + 0.12, y: ic.y - 0.12 }], '#fff', 2);
+    g.text('turning point', ic, { dy: 15, size: 11, color: 'rgba(255,255,255,0.75)' });
+  }
+  g.arrow(cur.p, V.mul(cur.vel, k), C.ink, 3.2);
+  g.dot(cur.hub, C.aim, 4);
+  g.dot(cur.p, C.ink, 6);
+  g.note(r === 1 && vr === 1 ? 'A point on the rim draws a cycloid. At the bottom it is at rest.' : 'The path of the point you follow');
+
+  // Bottom: the camera rides on the hub. The wheel only turns, and the ground goes by.
+  const h = pens[1].begin();
+  h.box(-6, 6, -1.9, 1.9, 8);
+  const off = (vr * t) % 1;
+  h.line([{ x: -6, y: -1 }, { x: 6, y: -1 }], 'rgba(155,231,166,0.7)', 3);
+  for (let x = -7 - off; x < 7; x++) h.line([{ x, y: -1 }, { x: x - 0.12, y: -1.14 }], 'rgba(155,231,166,0.45)', 1.5);
+  wheel(h, { x: 0, y: 0 }, -t);
+  if (r > 0) h.circle({ x: 0, y: 0 }, r, { stroke: 'rgba(255,162,74,0.55)', width: 1.5, dash: [5, 5] });
+  h.arrow({ x: 0, y: -1.02 }, { x: -vr * k, y: 0 }, C.you, 3, 'ground');
+  h.arrow({ x: 0, y: -0.86 }, { x: -k, y: 0 }, C.ball, 3, 'rim');
+  const rel = cur.rel;
+  h.arrow(rel, V.mul({ x: Math.sin(cur.phi) * r, y: -Math.cos(cur.phi) * r }, k), C.ink, 3);
+  h.dot({ x: 0, y: 0 }, C.aim, 4);
+  h.dot(rel, C.ink, 6);
+  h.note('The wheel only turns. The ground goes by underneath.');
+
+  // The text.
+  const speeds = [];
+  for (let s = 0; s < 2 * Math.PI; s += 0.02) speeds.push(V.len(at(s).vel));
+  const vmin = Math.min(...speeds), vmax = Math.max(...speeds);
+  const sp = V.len(cur.vel);
+  const kind = r === 0 ? 'The hub moves in a straight line' : r < 1 ? 'A point inside the rim draws a smooth wave (a curtate cycloid)' : r === 1 ? 'A point on the rim draws a cycloid, with a sharp point where it touches the ground' : 'A point outside the rim draws a curve with loops (a prolate cycloid)';
+  const contact = vr === 1 ? 'The wheel rolls without slipping: the point touching the ground is <b>at rest</b> for that instant, and the top of the wheel moves at <b>twice</b> the speed of the hub.'
+    : vr < 1 ? 'The rim moves faster than the wheel travels: the contact point slides backward on the ground. This is wheelspin.'
+    : 'The wheel travels faster than the rim turns: the contact point slides forward on the ground. This is a skid.';
+  app.explain(`${nums([
+    ['speed of the point now', `${sp.toFixed(2)}`, 'rim speeds'],
+    ['slowest in a turn', vmin.toFixed(2)], ['fastest in a turn', vmax.toFixed(2)],
+    ...(r === 1 && vr === 1 ? [['one arch is', '8 R', 'long'], ['area under an arch', '3 ×', 'the wheel']] : []),
+  ])}
+    <p>${kind}.</p><p>${contact}</p>
+    <p>At every instant, every point of the wheel moves as if the wheel were turning about one fixed center (the cross in the top view). For rolling, that center is the contact point. Each arrow is at right angles to the line from the center, and its length is proportional to the distance from it.</p>
+    ${r > 1 && vr === 1 ? '<p>The flange of a train wheel sticks out below the rail. At the bottom of each loop that part of the wheel moves <b>backward</b>, while the train goes forward.</p>' : ''}`);
+}
+tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

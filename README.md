@@ -1,48 +1,86 @@
-# Coriolis, seen two ways
+# Spin
 
-An interactive teaching page about the Coriolis effect. Open `index.html` in a browser (it loads
-three.js from a public CDN, so it needs an internet connection).
+Interactive explainers of motion and rotation. Most of them show the same motion from two points of
+view, so you can see why it looks the way it does. Open `index.html` for the list, or open one
+explainer directly, for example `coriolis/index.html`.
 
-The one idea: a thrown ball flies straight, but the ground under it turns, so seen from the ground
-its path curves. Every situation is shown twice, side by side: from a camera that does not turn,
-and from the turning ground.
+Each explainer is one page in its own folder. They run in a browser and need no build step and no
+sign-in. They work when opened from disk, except that two of them (the Coriolis effect and the launch
+heading) load [three.js](https://threejs.org) from a public CDN, so those need an internet
+connection. The Earth picture on the Coriolis page also needs the page to be served
+(for example with `python -m http.server`), because browsers do not load textures from disk.
 
-- **Playground:** a ball thrown on a turning roundabout, from the edge or from the center. The
-  ball's path is inked onto the turning disc, so the straight flight and the curved trace are seen
-  as one event. Arrows at the throw show that the ball also keeps the thrower's own motion.
-- **Spinning space station:** a ball dropped in a ring station that spins for 1 g. Seen from
-  outside it flies straight; inside it lands behind the spot below your hand (about 29 cm in a
-  station 79 m across). Small stations drift more, which is why designers want large ones.
-- **On Earth:** a patch of ground at latitude φ turns around its own vertical like a roundabout, at
-  sin φ times Earth's rate. The small globe shows why: Earth's spin split into a part around the
-  local vertical (it turns the ground) and a part along the ground (it only tilts it).
-  - Cannon shell fired 30 km north: about 90 m to the side at 45°.
-  - Long-range shells, north and south: fired 3,900 km at 5.5 km/s, computed as real flights
-    through space under Earth's gravity. Fired toward the pole a shell lands east of its aim
-    (about 220 km from Paris), fired toward the equator it lands west (about 280 km).
-  - Foucault pendulum: the swing keeps its direction in space; the ground turns under it, once in
-    a sidereal day divided by sin φ (Paris: about 32 hours).
-  - Storm winds: air flowing into a low spirals counterclockwise in the north, clockwise in the
-    south. Computed on the turning ground, with friction near the ground. With "High up" (almost
-    no friction) the wind blows around the low instead: wind at your back, low on your left.
-  - Trade winds: air flowing from about 30° toward the equator turns west, so the trade winds
-    blow from the northeast and the southeast.
-  - Ocean loops: water set moving by a storm runs in circles after the wind stops, once in
-    12 hours / sin(latitude), carried along by a slow current, as drifting buoys show.
-  - East or west, lighter or heavier (the Eötvös effect): the part of Earth's spin along the
-    ground. A 100 kg person in a jet at the equator weighs about 470 g less going east, 270 g
-    more going west.
-  - Sink drain: a real drift of hundredths of a millimeter, far too small to decide the direction.
-  - Ball dropped from a 100 m tower: it lands about 2 cm east at the equator.
+## The explainers
 
-**2D or 3D.** The cases that cover a large part of the Earth (the long-range shells, the storm
-winds and the trade winds) can also be shown on two 3D globes. For the shells, the left globe is
-seen from space and turns under the flights; the right one turns with the ground. Drag a globe to
-turn it, scroll or pinch to zoom. The cases on a small patch of ground stay flat.
+**Rotating frames**
 
-Where a real drift is too small to see, the picture spins Earth faster, and says by how much. The
-numbers always use the real spin.
+- `coriolis`: a thrown ball flies straight, but the ground under it turns. A roundabout, a space
+  station, cannon shells, a Foucault pendulum, storms, trade winds, ocean loops, the Eötvös effect, a
+  dropped ball, with 2D and 3D views. ([Details](coriolis/README.md))
+- `centrifugal`: a ball on a string (cut it), water in a spinning bucket (a parabola), and a wall
+  ride that pins you with friction. The outward force is a pretend force of the turning frame.
+- `lagrange`: the five points of the restricted three-body problem, on a map of the effective
+  potential. Place a particle anywhere. L4 and L5 are stable for a mass ratio below 0.0385.
+
+**Rotating bodies**
+
+- `gyroscope`: a heavy top with precession and nutation (Euler's equations), and a wheel you push.
+  The axle turns at right angles to the push.
+- `momentum`: a skater pulling in the arms (I × ω is fixed, the energy rises), a falling cat (zero
+  angular momentum, two halves), and a tumbling box (the tennis racket theorem).
+- `stability`: the benchmark bicycle (stable between about 4.3 and 6.0 m/s, from the published
+  matrices), and a spinning coin (Moffatt's finite-time singularity, with sound).
+- `rolling`: a point on a rolling wheel (hub, rim, flange), slipping and skidding, and the turning
+  point. The cycloid, 8R long, with an area of 3πR².
+
+**Orbits and gravity**
+
+- `orbits`: Kepler's laws with equal-area wedges, Newton's cannon with the energy well, and an orbit
+  that turns slowly (the 1/r⁴ pull, as in Mercury).
+- `maneuvers`: burns in orbit, a Hohmann transfer (LEO to geostationary: 3.8 km/s), and a chase of a
+  station seen from the station.
+- `slingshot`: a gravity assist seen from the Sun and from the planet. The speed gained, and the
+  speed in the planet's frame, which does not change.
+- `inclination`: how the launch heading and the latitude decide the tilt of an orbit,
+  cos i = sin A · cos φ. (From the former `orbit-tilt` page.)
+- `tides`: two tides a day, spring and neap tides with the Sun, and tidal locking.
+
+**Moving observers**
+
+- `relativity`: a light clock (moving clocks run slow), a train and two lightning strikes
+  (simultaneity), and a spacetime diagram with events you can drag.
+- `observers`: rain on a moving person (run or walk), the Doppler effect of a passing siren (with
+  sound and a Mach cone), and aberration of starlight at high speed.
+
+**Waves and oscillation**
+
+- `resonance`: a driven, damped oscillator, with its response curve and phase.
+- `coupled`: two coupled pendulums (normal modes and beats), and a chain of masses.
+- `waves`: standing waves, the harmonics of a plucked string (with sound), and reflection from a
+  fixed and a free end.
+- `fourier`: circles that add up to a square, sawtooth or triangle wave, or to a picture you draw.
+
+**Fields and charges**
+
+- `charged`: a charge in a magnetic field, the E×B drift (the same in the lab and in the drift
+  frame), and a particle trapped in Earth's field (mirror points and drift).
+- `induction`: a magnet and a coil (in the frame of each), a generator, and a magnet falling through
+  a copper tube.
+
+## How it is built
+
+- `shared/spin.js`: the code every explainer uses. A list of the explainers, the top bar, the page
+  layout, the controls, the play bar (Go, Pause, Loop, Speed), a 2D drawing pen with charts and mouse
+  input, a small 3D camera for flat canvases, and some number helpers. It is a classic script, so the
+  pages also work from disk.
+- `shared/spin.css` and `shared/topbar.css`: the look.
+- One folder per explainer, with an `index.html` that builds its page with `Spin.app({...})`.
+
+To add an explainer: copy a small one (for example `resonance/index.html`), add an entry to
+`TOPICS` and `ICONS` in `shared/spin.js`, and it appears on the home page and in the menu.
 
 ## Credits
 
-`earth.webp`: NASA Blue Marble, by NASA's Earth Observatory (public domain).
+- `coriolis/earth.webp`: NASA Blue Marble, by NASA's Earth Observatory (public domain).
+- The bicycle numbers are the benchmark bicycle of Meijaard, Papadopoulos, Ruina and Schwab (2007).
+- three.js is used by the Coriolis and the launch heading pages.

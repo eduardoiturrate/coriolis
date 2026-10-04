@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Centrifugal force · Spin</title>
+<meta name="description" content="Is centrifugal force real? A ball on a string, water in a spinning bucket and a ride that pins you to the wall, each seen from outside and from the turning frame." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU } = Spin;
+const G = 9.81;
+
+const app = Spin.app({
+  slug: 'centrifugal',
+  sub: 'Seen from outside, nothing pushes outward. Seen from the turning frame, something seems to. Both views are right.',
+  views: [{ caption: 'Seen from outside, not turning' }, { caption: 'Seen from the turning frame' }],
+});
+const { ui, tr, pens } = app;
+
+app.modes('mode', [['string', 'Ball on a string'], ['bucket', 'Spinning bucket'], ['rotor', 'Wall ride']]);
+const isMode = (m) => (v) => v.mode === m;
+
+// Ball on a string
+ui.slider('rps', { label: 'Turns a second', min: 0.3, max: 2, step: 0.05, value: 0.8, fmt: (v) => v.toFixed(2), show: isMode('string') });
+ui.slider('rad', { label: 'Length of the string', min: 0.5, max: 3, step: 0.1, value: 1.5, fmt: (v) => `${v.toFixed(1)} m`, show: isMode('string') });
+ui.slider('mass', { label: 'Mass of the ball', min: 0.1, max: 2, step: 0.1, value: 0.5, fmt: (v) => `${v.toFixed(1)} kg`, show: isMode('string') });
+ui.check('pretend', 'Show the pretend forces in the turning frame', true, { show: isMode('string') });
+// Bucket
+ui.slider('bps', { label: 'Turns a second', min: 0, max: 2.6, step: 0.05, value: 1.6, fmt: (v) => v.toFixed(2), show: isMode('bucket') });
+ui.slider('parcel', { label: 'Where on the surface', min: 0.1, max: 1, step: 0.05, value: 0.7, fmt: (v) => `${Math.round(v * 100)}% of the way to the wall`, show: isMode('bucket') });
+// Wall ride
+ui.slider('rr', { label: 'Radius of the ride', min: 2, max: 4, step: 0.1, value: 3, fmt: (v) => `${v.toFixed(1)} m`, show: isMode('rotor') });
+ui.slider('rpm', { label: 'Turns a minute', min: 12, max: 36, step: 1, value: 28, fmt: (v) => String(v), show: isMode('rotor') });
+ui.slider('mu', { label: 'Friction of the wall', min: 0.1, max: 0.8, step: 0.05, value: 0.4, fmt: (v) => v.toFixed(2), show: isMode('rotor') });
+
+let phase = 0, last = performance.now(), flying = false, cutPhase = 0;
+function setupMode() {
+  const m = ui.v.mode;
+  tr.setGo(m === 'string' ? 'Cut the string' : m === 'bucket' ? 'Spin up from rest' : 'Drop the floor');
+  const caps = {
+    string: ['Seen from outside, not turning', 'Seen by the ball, turning with it'],
+    bucket: ['Side view of the bucket, not turning', 'The same, as seen by the water'],
+    rotor: ['From above, not turning', 'From the side, turning with the ride'],
+  }[m];
+  app.caption(0, caps[0]); app.caption(1, caps[1]);
+}
+tr.onStart = () => { flying = ui.v.mode === 'string'; cutPhase = phase; };
+ui.on((id) => { if (id === 'mode') setupMode(); flying = false; tr.reset(); });
+setupMode();
+
+// ---------- Ball on a string ----------
+
+function drawString(dt) {
+  const { rps, rad, mass, pretend } = ui.v;
+  const w = TAU * rps, r = rad;
+  const L = pens[0].begin().box(-5.5, 5.5, -5.5, 5.5, 14);
+  const R = pens[1].begin().box(-5.5, 5.5, -5.5, 5.5, 14);
+  if (!flying) phase += w * dt;
+  const t = flying ? tr.t : 0;
+  const ang = flying ? cutPhase : phase;
+  const p0 = V.polar(r, ang), v0 = V.mul(V.polar(1, ang + Math.PI / 2), w * r);
+  const pIn = (s) => V.add(p0, V.mul(v0, s));
+  const frameAngle = (s) => (flying ? cutPhase + w * s : phase);
+  const pRot = (s) => V.rot(pIn(s), -frameAngle(s));
+  const cur = pIn(t), curRot = pRot(t);
+  if (flying && V.len(cur) > 5.3) { if (tr.t > 0.2) tr.finish(); }
+  const tension = mass * w * w * r;
+
+  // Left: the ball and the room do not turn.
+  const marks = [];
+  for (let k = 0; k < 12; k++) marks.push(V.polar(5.1, (k * TAU) / 12));
+  marks.forEach((p) => L.dot(p, 'rgba(255,255,255,0.35)', 3));
+  L.circle({ x: 0, y: 0 }, r, { stroke: 'rgba(255,255,255,0.25)', width: 1.5, dash: [5, 6] });
+  if (flying) {
+    const tail = []; for (let s = 0; s <= t; s += 0.02) tail.push(pIn(s));
+    L.line(tail, C.ball, 3);
+  } else L.line([{ x: 0, y: 0 }, cur], 'rgba(255,255,255,0.7)', 2.5);
+  L.dot({ x: 0, y: 0 }, C.aim, 5);
+  L.arrow(cur, V.mul(V.norm(v0), 1.4), C.you, 3, 'velocity');
+  if (!flying) L.arrow(cur, V.mul(V.norm(cur), -1.4), C.ball, 3.5, 'string pulls in');
+  L.dot(cur, C.ink, 8);
+  L.note(flying ? 'No string, no force: the ball flies straight' : 'The string pulls the ball in, so it goes around');
+
+  // Right: the camera turns with the ball. The room turns the other way.
+  const Fa = frameAngle(t);
+  marks.forEach((p) => R.dot(V.rot(p, -Fa), 'rgba(255,255,255,0.35)', 3));
+  R.circle({ x: 0, y: 0 }, r, { stroke: 'rgba(255,255,255,0.25)', width: 1.5, dash: [5, 6] });
+  if (flying) {
+    const tail = []; for (let s = 0; s <= t; s += 0.02) tail.push(pRot(s));
+    R.line(tail, C.ink, 3);
+  } else R.line([{ x: 0, y: 0 }, curRot], 'rgba(255,255,255,0.7)', 2.5);
+  R.dot({ x: 0, y: 0 }, C.aim, 5);
+  const rho = V.len(curRot), out = V.norm(curRot);
+  if (!flying) R.arrow(curRot, V.mul(out, -1.4), C.ball, 3.5, 'string pulls in');
+  if (pretend) {
+    R.arrow(curRot, V.mul(out, 1.4 * (rho / r)), C.friend, 3.5, 'centrifugal (pretend)');
+    if (flying) {
+      // The pretend Coriolis acceleration, 2 w times the speed in the turning frame, at right angles to it.
+      const e = 0.01, a = pRot(t - e), b = pRot(t + e);
+      const vr = V.mul(V.sub(b, a), 1 / (2 * e));
+      const cor = { x: 2 * w * vr.y, y: -2 * w * vr.x };
+      R.arrow(curRot, V.mul(cor, Math.min(3.2, V.len(cor) / (w * w * r) * 1.4) / (V.len(cor) || 1)), C.spin, 3.5, 'Coriolis (pretend)');
+    }
+  }
+  R.dot(curRot, C.ink, 8);
+  R.note(flying ? 'The ball swings outward in a curve. Pretend forces explain it.' : 'The ball is at rest: the string and the pretend force balance');
+
+  app.explain(`${nums([['pull of the string', `${tension.toFixed(1)}`, 'N'], ['speed of the ball', `${(w * r).toFixed(1)}`, 'm/s'], ['acceleration toward the center', `${(w * w * r).toFixed(0)}`, 'm/s²']])}
+    <p><b>Left:</b> the only force on the ball is the pull of the string, toward the center. It makes the ball turn. If the string is cut, nothing is left, and the ball flies off in a <b>straight line</b> at the speed it had.</p>
+    <p><b>Right:</b> from the turning frame the ball sits still, so the forces must add to zero. The string pulls in, so something must push out. We call it <b>centrifugal force</b>, mω²r. It is not a push from anything. It is the cost of using a frame that turns. After the cut it still appears, and with the Coriolis term it explains the curved path.</p>`);
+}
+
+// ---------- Water in a spinning bucket ----------
+
+const BR = 0.15, BH = 0.32, DEPTH = 0.15;
+const surface = (r, w) => DEPTH + (w * w * (r * r - (BR * BR) / 2)) / (2 * G);
+
+function drawBucket() {
+  const { bps, parcel } = ui.v;
+  const wFull = TAU * bps;
+  const spinning = tr.running || tr.endedAt;
+  const w = spinning ? wFull * Math.min(1, tr.t / 4) : wFull;
+  if (spinning && tr.t > 6) tr.finish();
+  const pts = [];
+  for (let i = -30; i <= 30; i++) { const r = (i / 30) * BR; pts.push({ x: r, y: surface(Math.abs(r), w) }); }
+  const rp = parcel * BR, p = { x: rp, y: surface(rp, w) };
+  const tilt = Math.atan2(w * w * rp, G); // the angle of the surface, and of the effective gravity from the vertical
+  const u = 0.075; // length of the weight arrow
+  for (const [i, pen] of [[0, pens[0]], [1, pens[1]]]) {
+    pen.begin().box(-0.22, 0.22, -0.05, BH + 0.06, 14);
+    pen.line([{ x: -BR, y: BH }, { x: -BR, y: 0 }, { x: BR, y: 0 }, { x: BR, y: BH }], 'rgba(201,211,223,0.85)', 4);
+    pen.poly([...pts, { x: BR, y: 0 }, { x: -BR, y: 0 }], { fill: 'rgba(79,195,247,0.35)' });
+    pen.line(pts, C.ball, 3);
+    pen.line([{ x: 0, y: -0.04 }, { x: 0, y: BH + 0.05 }], 'rgba(255,255,255,0.25)', 1.2, [4, 5]);
+    pen.dot(p, C.ink, 7);
+    pen.arrow(p, { x: 0, y: -u }, C.ink, 3, 'weight');
+    const n = { x: -Math.sin(tilt), y: Math.cos(tilt) }; // outward from the water, at right angles to the surface
+    pen.arrow(p, V.mul(n, u / Math.cos(tilt)), C.ball, 3, 'push of the water');
+    if (i === 0) {
+      pen.arrow(p, { x: -u * Math.tan(tilt), y: 0 }, C.you, 3.5, 'net: toward the axis');
+      pen.text('⊙ moving toward you', { x: p.x, y: p.y }, { dx: 8, dy: -22, size: 10.5, color: 'rgba(255,255,255,0.6)', align: 'left' });
+      pen.note('Not turning: the net force is the inward pull that turns the water');
+    } else {
+      pen.arrow(p, { x: u * Math.tan(tilt), y: 0 }, C.friend, 3, 'centrifugal (pretend)');
+      pen.arrow(p, { x: u * Math.tan(tilt), y: -u }, C.spin, 3, 'effective gravity');
+      pen.note('Turning with the water: it is at rest, so the forces add up to zero');
+    }
+  }
+  const rim = surface(BR, w), mid = surface(0, w);
+  app.explain(`${nums([['rim above the middle', fmt.dist(rim - mid)], ['slope at the spot', `${(tilt / Math.PI * 180).toFixed(0)}°`], ['spin', `${bps.toFixed(2)}`, 'turns a second']])}
+    <p><b>Left:</b> a bit of water on the surface has two forces: its weight, and the push of the water below, at right angles to the surface. Because the surface is tilted, the push leans toward the axis. The two add up to a net force <b>toward the axis</b>, exactly the pull needed to keep it going around. The surface tilts just enough: tan(slope) = ω²r / g.</p>
+    <p><b>Right:</b> in the turning frame the water is at rest. The pretend centrifugal force joins the weight, and their sum, the <b>effective gravity</b>, points straight into the surface. The water settles so that its surface is level across the effective gravity. That makes a parabola. Liquid-mirror telescopes use it: a spinning dish of mercury is a perfect parabolic mirror.</p>`);
+}
+
+// ---------- Wall ride ----------
+
+function drawRotor(dt) {
+  const { rr, rpm, mu } = ui.v;
+  const w = (rpm * TAU) / 60;
+  const spinning = tr.running || tr.endedAt;
+  const tDrop = 1.2;
+  if (spinning && tr.t > 7) tr.finish();
+  phase += w * dt;
+  const needed = Math.sqrt(G / (mu * rr)); // the slowest turn at which friction can hold a rider
+  const holds = w >= needed;
+  const press = (w * w * rr) / G; // the push of the wall, in multiples of the rider's weight
+  const acc = holds ? 0 : G - mu * w * w * rr; // downward acceleration after the floor drops
+
+  const L = pens[0].begin().box(-rr - 1.2, rr + 1.2, -rr - 1.2, rr + 1.2, 14);
+  L.circle({ x: 0, y: 0 }, rr, { fill: '#1b2638', stroke: 'rgba(255,255,255,0.4)', width: 4 });
+  for (let k = 0; k < 8; k++) L.dot(V.polar(rr - 0.25, phase + (k * TAU) / 8), k === 0 ? C.ink : C.you, k === 0 ? 8 : 5);
+  const rider = V.polar(rr - 0.25, phase);
+  L.arrow(rider, V.mul(V.norm(rider), -1.3), C.ball, 3.5, 'wall pushes in');
+  L.arrow(rider, V.mul(V.polar(1, phase + Math.PI / 2), 1.3), C.you, 3, 'velocity');
+  L.note('From above: the wall pushes the riders in, so they go around');
+
+  const R = pens[1].begin().box(-2.6, 1.0, -3.5, 2.4, 10);
+  const t = spinning ? tr.t : 0;
+  const drop = Math.max(0, t - tDrop);
+  const floorY = -1.8 - Math.min(1.4, drop * 2);
+  const yc0 = -0.95;
+  const y = holds ? yc0 : Math.max(-3.4 + 0.85, yc0 - 0.5 * acc * drop * drop);
+  R.line([{ x: 0, y: 2.2 }, { x: 0, y: -3.4 }], 'rgba(201,211,223,0.9)', 6);
+  R.line([{ x: -2.6, y: floorY }, { x: 0, y: floorY }], 'rgba(155,231,166,0.8)', 4);
+  R.rect(-0.55, y - 0.85, -0.05, y + 0.85, { fill: 'rgba(240,98,146,0.55)', stroke: C.friend, width: 2 });
+  R.dot({ x: -0.3, y: y + 0.6 }, C.friend, 7);
+  const c = { x: -0.3, y };
+  const k = 0.35; // length of an arrow for one weight, in meters
+  const lenN = Math.min(2.2, k * press * 0.8);
+  R.arrow({ x: -0.55, y }, { x: -lenN, y: 0 }, C.ball, 3.5, 'wall pushes in');
+  R.arrow({ x: -0.05, y: y + 0.25 }, { x: lenN, y: 0 }, C.friend, 3.5, 'centrifugal (pretend)');
+  R.arrow({ x: c.x - 0.1, y: y - 0.4 }, { x: 0, y: -k * 1.2 }, C.ink, 3.5, 'weight');
+  const fr = Math.min(1, mu * press);
+  R.arrow({ x: c.x + 0.1, y: y - 0.4 }, { x: 0, y: k * 1.2 * fr }, C.you, 3.5, 'friction');
+  R.note(!spinning ? 'Press Drop the floor' : drop <= 0 ? 'The floor is still there' : holds ? 'The floor is gone. Friction holds the rider.' : 'Not enough friction: the rider slides down', 16);
+
+  app.explain(`${nums([['wall pushes with', `${press.toFixed(1)}`, 'times your weight'], ['friction can hold', `${(mu * press).toFixed(2)}`, 'weights'], ['slowest spin that holds', `${(needed * 60 / TAU).toFixed(0)}`, 'turns a minute']])}
+    <p><b>From above:</b> the wall pushes the riders in with the force that turns them: mω²R. That is the only horizontal force.</p>
+    <p><b>From the side, turning with the ride:</b> the rider is at rest. The wall pushes in, and the pretend centrifugal force pushes out, and they balance. Friction against the wall is what holds the rider up, and it can be at most μ times the wall's push. To stay up it must carry the whole weight: μω²R ≥ g. Here that needs ${(needed * 60 / TAU).toFixed(0)} turns a minute or more. ${holds ? 'The ride is fast enough.' : '<b>The ride is too slow.</b>'}</p>`);
+}
+
+let lastT = performance.now();
+Spin.run((now) => {
+  const dt = Math.min(0.1, (now - lastT) / 1000) * tr.speed;
+  lastT = now;
+  tr.step(now);
+  const m = ui.v.mode;
+  if (m === 'string') drawString(dt);
+  else if (m === 'bucket') drawBucket();
+  else drawRotor(dt);
+});
+</script>
+</body>
+</html>

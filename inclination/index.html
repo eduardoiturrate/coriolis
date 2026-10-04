@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Launch heading and orbit tilt · Spin</title>
+<meta name="description" content="An interactive 3D model: how the heading of a rocket launch and the latitude of the launch site decide the tilt of the orbit, cos i = sin A · cos φ." />
+<meta name="color-scheme" content="dark" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%2314365e' stroke='%23c9d3df' stroke-width='1.5'/%3E%3Cellipse cx='16' cy='16' rx='15' ry='6' transform='rotate(-35 16 16)' fill='none' stroke='%234fc3f7' stroke-width='2'/%3E%3C/svg%3E" />
+<!--
+  A teaching model: how the direction of a launch (its heading) and the latitude of the launch
+  site decide the tilt of the orbit (its inclination): cos i = sin A · cos φ.
+
+  One file. It loads three.js from a public CDN, so it works when opened straight from the disk
+  (with an internet connection). Not part of the game. Now part of Spin.
+-->
+<link rel="stylesheet" href="../shared/topbar.css" />
+<style>
+  :root { --bg: #04070d; --panel: rgba(12, 18, 30, 0.9); --line: rgba(255, 255, 255, 0.12); --text: #dfe6f0; --muted: #8a97ab;
+    --heading: #ffa24a; --orbit: #4fc3f7; --equator: #c9d3df; --angle: #ffd54f; --north: #ff6b6b; --target: #f06292; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; overflow: hidden; }
+  #view { position: fixed; inset: 44px 0 0 0; }
+  .panel { position: fixed; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; backdrop-filter: blur(6px); }
+  #controls { top: 56px; left: 12px; width: 330px; max-height: calc(100% - 68px); overflow-y: auto; }
+  h1 { font-size: 17px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12.5px; margin-bottom: 10px; }
+  .row { margin: 10px 0; }
+  .row label { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--muted); }
+  .row label b { color: var(--text); font-family: ui-monospace, monospace; }
+  input[type=range] { width: 100%; accent-color: var(--orbit); }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+  button { font: inherit; font-size: 12px; color: var(--text); background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+  button:hover { background: rgba(255, 255, 255, 0.13); }
+  button.on { border-color: var(--orbit); background: rgba(79, 195, 247, 0.2); }
+  .sec { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+  .sec h2 { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+  .check { display: flex; align-items: center; gap: 7px; font-size: 13px; margin: 6px 0; cursor: pointer; }
+  #formula { top: 56px; right: 12px; width: 330px; }
+  .eq { font-family: ui-monospace, monospace; font-size: 13px; line-height: 1.7; }
+  .eq .h { color: var(--heading); } .eq .o { color: var(--orbit); } .eq .a { color: var(--angle); } .eq .l { color: #9be7a6; }
+  .big { font-size: 22px; font-weight: 700; color: var(--angle); font-family: ui-monospace, monospace; }
+  .why { font-size: 12.5px; color: var(--text); margin-top: 8px; }
+  .why p { margin: 6px 0; }
+  .warn { color: var(--target); font-size: 12.5px; margin-top: 6px; }
+  #legend { bottom: 12px; right: 12px; width: 330px; font-size: 12.5px; }
+  .key { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+  .sw { width: 22px; height: 4px; border-radius: 2px; flex: none; }
+  .lbl { font: 600 12px system-ui, sans-serif; color: #fff; text-shadow: 0 0 4px #000, 0 0 8px #000; white-space: nowrap; pointer-events: none; }
+  .lbl.small { font-size: 11px; font-weight: 500; }
+  #toggle { display: none; position: fixed; z-index: 3; }
+  .credit { margin-top: 10px; color: var(--muted); font-size: 11px; }
+  .credit a { color: var(--muted); }
+  @media (max-width: 900px) { #legend { display: none; } #formula { width: 260px; } #controls { width: 260px; } }
+  /* On a phone: the formula at the top, the controls in a panel that opens from a button. */
+  @media (max-width: 640px) {
+    #toggle { display: block; left: 12px; bottom: 12px; padding: 8px 12px; font-size: 14px; background: var(--panel); }
+    #controls { top: auto; bottom: 58px; left: 12px; right: 12px; width: auto; max-height: 55%; }
+    #controls.closed { display: none; }
+    #formula { left: 12px; right: 12px; width: auto; padding: 8px 10px; }
+    #formula .why { display: none; }
+    .big { font-size: 18px; }
+  }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>Spin.topbar('inclination');</script>
+<div id="view"></div>
+<button id="toggle">Controls</button>
+
+<div id="controls" class="panel">
+  <h1>Heading and orbit tilt</h1>
+  <div class="sub">Drag to turn the view. Scroll to zoom.</div>
+
+  <div class="row">
+    <label>Latitude of the launch site <b id="latV"></b></label>
+    <input id="lat" type="range" min="0" max="90" step="0.1" value="28.6" />
+    <div class="chips">
+      <button data-lat="5.2">Kourou 5.2°</button>
+      <button data-lat="28.6">Kennedy 28.6°</button>
+      <button data-lat="34.7">Vandenberg 34.7°</button>
+      <button data-lat="45.9">Baikonur 45.9°</button>
+      <button data-lat="62.9">Plesetsk 62.9°</button>
+      <button data-lat="90">North pole 90°</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <label>Heading of the launch (from north toward east) <b id="headV"></b></label>
+    <input id="head" type="range" min="0" max="359" step="0.5" value="90" />
+    <div class="chips">
+      <button data-head="0">North 0°</button>
+      <button data-head="45">45°</button>
+      <button data-head="90">East 90°</button>
+      <button data-head="135">135°</button>
+      <button data-head="180">South 180°</button>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>Find the heading for a tilt</h2>
+    <div class="row">
+      <label>Wanted tilt <b id="wantV"></b></label>
+      <input id="want" type="range" min="0" max="180" step="0.1" value="51.6" />
+      <div class="chips">
+        <button data-want="0">0° (equator)</button>
+        <button data-want="51.6">51.6° (space station)</button>
+        <button data-want="90">90° (over the poles)</button>
+        <button data-want="98">98° (sun-synchronous)</button>
+      </div>
+    </div>
+    <label class="check"><input id="showWant" type="checkbox" checked /> Show the two headings that give this tilt</label>
+    <div class="chips"><button id="useNE">Fly the first heading</button><button id="useSE">Fly the second heading</button></div>
+    <div id="wantMsg" class="warn"></div>
+  </div>
+
+  <div class="sec">
+    <h2>Show</h2>
+    <label class="check"><input id="showPlanes" type="checkbox" checked /> The two planes as flat discs</label>
+    <label class="check"><input id="showNormals" type="checkbox" /> The axes of the two planes (normals)</label>
+    <label class="check"><input id="showParallel" type="checkbox" /> The circle of the site's latitude (not an orbit)</label>
+    <label class="check"><input id="showParts" type="checkbox" checked /> The heading split into north and east parts</label>
+    <label class="check"><input id="spin" type="checkbox" /> Let Earth turn under the orbit</label>
+  </div>
+
+  <div class="sec">
+    <h2>Look</h2>
+    <div class="chips">
+      <button id="vFree">Free view</button>
+      <button id="vSite">Down on the launch site</button>
+      <button id="vEdge">Along the crossing line</button>
+      <button id="vPole">From above the north pole</button>
+    </div>
+  </div>
+  <div class="credit">Made with <a href="https://threejs.org" target="_blank" rel="noopener">three.js</a>. The drawn orbit is higher than a real low orbit, so it is easy to see.</div>
+</div>
+
+<div id="formula" class="panel">
+  <div class="eq" id="eq"></div>
+  <div class="big" id="iV"></div>
+  <div class="why" id="why"></div>
+</div>
+
+<div id="legend" class="panel">
+  <div class="key"><span class="sw" style="background:var(--heading)"></span>Heading: the direction the rocket flies at the start</div>
+  <div class="key"><span class="sw" style="background:var(--orbit)"></span>The orbit: a circle around Earth's centre</div>
+  <div class="key"><span class="sw" style="background:var(--equator)"></span>The equator</div>
+  <div class="key"><span class="sw" style="background:var(--angle)"></span>The tilt i: the angle between the two planes</div>
+  <div class="key"><span class="sw" style="background:var(--target)"></span>The two headings for the wanted tilt</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+const DEG = Math.PI / 180;
+const R = 1;            // Earth's radius
+const RO = 1.32;        // radius of the drawn orbit (higher than a real low orbit, so it is easy to see)
+const C = { heading: 0xffa24a, orbit: 0x4fc3f7, equator: 0xc9d3df, angle: 0xffd54f, north: 0xff6b6b, target: 0xf06292, east: 0x9be7a6 };
+
+// ---------- Scene ----------
+const host = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+host.appendChild(renderer.domElement);
+const labels = new CSS2DRenderer();
+labels.domElement.style.position = 'fixed';
+labels.domElement.style.inset = '44px 0 0 0';
+labels.domElement.style.pointerEvents = 'none';
+host.appendChild(labels.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+camera.position.set(3.6, 2.2, 4.2);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.minDistance = 1.6;
+controls.maxDistance = 14;
+scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(4, 3, 5);
+scene.add(sun);
+
+function resize() {
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h);
+  labels.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+// Small helpers.
+const v3 = (x, y, z) => new THREE.Vector3(x, y, z);
+const Y = v3(0, 1, 0);
+function label(text, cls = '') {
+  const d = document.createElement('div');
+  d.className = `lbl ${cls}`;
+  d.textContent = text;
+  return new CSS2DObject(d);
+}
+function lineMat(color, opacity = 1, dashed = false) {
+  return dashed
+    ? new THREE.LineDashedMaterial({ color, transparent: true, opacity, dashSize: 0.05, gapSize: 0.035, depthWrite: false })
+    : new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false });
+}
+/** A tube along points: lines of 1 pixel are too thin to read. */
+function tube(points, radius, color, closed = false, opacity = 1) {
+  const curve = new THREE.CatmullRomCurve3(points, closed);
+  return new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(16, points.length), radius, 8, closed),
+    new THREE.MeshBasicMaterial({ color, transparent: opacity < 1, opacity, depthWrite: opacity >= 1 }));
+}
+/** A circle of radius r in the plane through the centre with unit normal n, starting at unit direction u (in that plane). */
+function circlePoints(n, u, r, from = 0, to = 2 * Math.PI, steps = 180) {
+  const w = n.clone().cross(u).normalize();
+  const pts = [];
+  for (let k = 0; k <= steps; k++) {
+    const t = from + ((to - from) * k) / steps;
+    pts.push(u.clone().multiplyScalar(Math.cos(t) * r).addScaledVector(w, Math.sin(t) * r));
+  }
+  return pts;
+}
+/** An arrow made of a tube and a cone, from `from` along `dir` (unit) for `len`. */
+function arrow(from, dir, len, color, radius = 0.012) {
+  const g = new THREE.Group();
+  const head = Math.min(0.08, len * 0.35);
+  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, len - head, 12), new THREE.MeshBasicMaterial({ color }));
+  shaft.position.y = (len - head) / 2;
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(radius * 3.2, head, 16), new THREE.MeshBasicMaterial({ color }));
+  cone.position.y = len - head / 2;
+  g.add(shaft, cone);
+  g.position.copy(from);
+  g.quaternion.setFromUnitVectors(Y, dir.clone().normalize());
+  return g;
+}
+function dispose(group) {
+  group.traverse((o) => {
+    o.geometry?.dispose();
+    if (o.material) o.material.dispose();
+    if (o.isCSS2DObject) o.element.remove();
+  });
+  group.clear();
+}
+
+// ---------- Earth: it turns (when spinning), and with it the site and the ground compass ----------
+const earth = new THREE.Group();
+scene.add(earth);
+const globe = new THREE.Mesh(new THREE.SphereGeometry(R, 96, 48),
+  new THREE.MeshStandardMaterial({ color: 0x14365e, roughness: 0.9, transparent: true, opacity: 0.55, depthWrite: false }));
+earth.add(globe);
+// Lines of latitude and longitude every 15 degrees.
+for (let lat = -75; lat <= 75; lat += 15) {
+  if (lat === 0) continue;
+  const r = Math.cos(lat * DEG) * R * 1.001, y = Math.sin(lat * DEG) * R * 1.001;
+  const pts = [];
+  for (let k = 0; k <= 120; k++) { const a = (k / 120) * 2 * Math.PI; pts.push(v3(Math.cos(a) * r, y, Math.sin(a) * r)); }
+  earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat(0x6f8fb8, 0.35)));
+}
+for (let lon = 0; lon < 180; lon += 15) {
+  const pts = circlePoints(v3(Math.sin(lon * DEG), 0, Math.cos(lon * DEG)), Y, R * 1.001);
+  earth.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat(0x6f8fb8, 0.25)));
+}
+// The axis, with its north end marked.
+scene.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([v3(0, -1.55, 0), v3(0, 1.55, 0)]), lineMat(0xffffff, 0.45)));
+const nLabel = label('N pole');
+nLabel.position.set(0, 1.62, 0);
+scene.add(nLabel);
+// Earth's centre: every orbit goes around it.
+const centre = new THREE.Mesh(new THREE.SphereGeometry(0.025, 16, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false }));
+centre.renderOrder = 5;
+scene.add(centre);
+const centreLabel = label('centre of Earth', 'small');
+centreLabel.position.set(0.04, -0.07, 0);
+scene.add(centreLabel);
+
+// The equator, and the plane of the equator.
+const equator = tube(circlePoints(Y, v3(1, 0, 0), R * 1.004), 0.006, C.equator, true);
+scene.add(equator);
+const eqPlane = new THREE.Mesh(new THREE.RingGeometry(0, 1.75, 96), new THREE.MeshBasicMaterial({ color: C.equator, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
+eqPlane.rotation.x = -Math.PI / 2;
+scene.add(eqPlane);
+const eqLabel = label('equator', 'small');
+scene.add(eqLabel);
+
+// Things that change with the settings are made again in these groups.
+const siteGroup = new THREE.Group();   // on the turning Earth: the site and its ground compass
+earth.add(siteGroup);
+const orbitGroup = new THREE.Group();  // fixed in space: the orbit, the angle, the normals
+scene.add(orbitGroup);
+const wantGroup = new THREE.Group();   // the two headings for the wanted tilt
+earth.add(wantGroup);
+
+// The satellite that flies the orbit.
+const sat = new THREE.Mesh(new THREE.SphereGeometry(0.028, 16, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+scene.add(sat);
+
+// ---------- The geometry of a launch ----------
+/**
+ * At latitude `lat` (rad, longitude 0), flying toward heading `A` (rad): the unit vectors up, east
+ * and north, the direction of flight d, and the orbit's normal n = up × d. Its part along the
+ * axis is cos i = sin A · cos lat.
+ */
+function launch(lat, A) {
+  const up = v3(Math.cos(lat), Math.sin(lat), 0);
+  const east = v3(0, 0, -1);
+  const north = up.clone().cross(east);           // (-sin lat, cos lat, 0)
+  const d = north.clone().multiplyScalar(Math.cos(A)).addScaledVector(east, Math.sin(A));
+  const n = up.clone().cross(d).normalize();
+  return { up, east, north, d, n, i: Math.acos(THREE.MathUtils.clamp(n.y, -1, 1)) };
+}
+
+const state = { lat: 28.6, head: 90, want: 51.6, spin: false, angle: 0, satT: 0, launchAngle: 0 };
+
+function build() {
+  const lat = state.lat * DEG, A = state.head * DEG;
+  const L = launch(lat, A);
+  dispose(siteGroup);
+  dispose(orbitGroup);
+  dispose(wantGroup);
+
+  // --- The launch site and its ground compass (on the turning Earth).
+  const site = L.up.clone().multiplyScalar(R);
+  const pad = new THREE.Mesh(new THREE.SphereGeometry(0.03, 16, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  pad.position.copy(site);
+  siteGroup.add(pad);
+  const atPole = state.lat >= 89.95;
+  const padLabel = label(atPole ? 'launch site at the north pole' : `launch site, ${state.lat.toFixed(1)}° north`);
+  padLabel.position.copy(L.up.clone().multiplyScalar(R + 0.12));
+  siteGroup.add(padLabel);
+  // A small flat compass on the ground: north (red), east, and the heading (orange).
+  const rose = new THREE.Mesh(new THREE.RingGeometry(0.16, 0.172, 64), new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide, transparent: true, opacity: 0.7 }));
+  rose.position.copy(L.up.clone().multiplyScalar(R + 0.003));
+  rose.quaternion.setFromUnitVectors(v3(0, 0, 1), L.up);
+  siteGroup.add(rose);
+  const lift = L.up.clone().multiplyScalar(R + 0.006);
+  siteGroup.add(arrow(lift, L.north, 0.2, C.north, 0.006));
+  const nl = label('N', 'small'); nl.position.copy(lift.clone().addScaledVector(L.north, 0.25)); siteGroup.add(nl);
+  siteGroup.add(arrow(lift, L.east, 0.2, 0xffffff, 0.005));
+  const el = label('E', 'small'); el.position.copy(lift.clone().addScaledVector(L.east, 0.25)); siteGroup.add(el);
+  siteGroup.add(arrow(lift, L.d, 0.36, C.heading, 0.011));
+  const hl = label(`heading ${state.head.toFixed(0)}°`);
+  hl.element.style.color = '#ffa24a';
+  hl.position.copy(lift.clone().addScaledVector(L.d, 0.44));
+  siteGroup.add(hl);
+  // The heading split into a part toward north and a part toward east.
+  if (document.getElementById('showParts').checked) {
+    const pn = Math.cos(A), pe = Math.sin(A);
+    const tipN = lift.clone().addScaledVector(L.north, 0.36 * pn);
+    const tip = lift.clone().addScaledVector(L.d, 0.36);
+    const dash = (a, b, color) => {
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lineMat(color, 0.9, true));
+      line.computeLineDistances();
+      siteGroup.add(line);
+    };
+    dash(lift, tipN, C.north);
+    dash(tipN, tip, C.east);
+    const pl = label(`east part: sin ${state.head.toFixed(0)}° = ${pe.toFixed(2)}`, 'small');
+    pl.element.style.color = '#9be7a6';
+    pl.position.copy(tipN.clone().lerp(tip, 0.5).addScaledVector(L.up, 0.05).addScaledVector(L.north, pn >= 0 ? 0.06 : -0.06));
+    siteGroup.add(pl);
+  }
+
+  // --- The orbit: fixed in space, as Earth was turned when the rocket left.
+  const turn = new THREE.Quaternion().setFromAxisAngle(Y, state.launchAngle);
+  const up0 = L.up.clone().applyQuaternion(turn), d0 = L.d.clone().applyQuaternion(turn), n0 = L.n.clone().applyQuaternion(turn);
+  orbitGroup.add(tube(circlePoints(n0, up0, RO), 0.009, C.orbit, true));
+  if (document.getElementById('showPlanes').checked) {
+    const disc = new THREE.Mesh(new THREE.RingGeometry(0, 1.75, 96), new THREE.MeshBasicMaterial({ color: C.orbit, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false }));
+    disc.quaternion.setFromUnitVectors(v3(0, 0, 1), n0);
+    orbitGroup.add(disc);
+    eqPlane.visible = true;
+  } else eqPlane.visible = false;
+  // The highest point of the orbit: its latitude is the tilt.
+  const top = Y.clone().addScaledVector(n0, -n0.y);
+  if (top.lengthSq() > 1e-8) {
+    top.normalize().multiplyScalar(RO);
+    const tl = label(`highest point: ${(L.i / DEG > 90 ? 180 - L.i / DEG : L.i / DEG).toFixed(1)}° north`, 'small');
+    tl.element.style.color = '#4fc3f7';
+    tl.position.copy(top.clone().multiplyScalar(1.08));
+    orbitGroup.add(tl);
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.022, 12, 8), new THREE.MeshBasicMaterial({ color: C.orbit }));
+    dot.position.copy(top);
+    orbitGroup.add(dot);
+  }
+  // The line where the two planes cross, and the angle between them there.
+  const nodeDir = Y.clone().cross(n0);
+  if (nodeDir.lengthSq() > 1e-8) {
+    nodeDir.normalize();
+    const nodeLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([nodeDir.clone().multiplyScalar(-1.8), nodeDir.clone().multiplyScalar(1.8)]), lineMat(C.angle, 0.6, true));
+    nodeLine.computeLineDistances();
+    orbitGroup.add(nodeLine);
+    const P = nodeDir.clone().multiplyScalar(RO);
+    // At the crossing point: the direction along the equator and the direction along the orbit.
+    const alongEq = Y.clone().cross(nodeDir).normalize();
+    const alongOrbit = n0.clone().cross(nodeDir).normalize();
+    const arcN = alongEq.clone().cross(alongOrbit);
+    if (arcN.lengthSq() > 1e-10) {
+      arcN.normalize();
+      const arc = circlePoints(arcN, alongEq, 0.32, 0, L.i, 48).map((p) => p.add(P));
+      orbitGroup.add(tube(arc, 0.007, C.angle));
+      // The angle as a filled wedge, so it reads as an angle.
+      const wedge = new THREE.Mesh(new THREE.BufferGeometry().setFromPoints([P, ...arc].flatMap((p, k, a) => (k > 1 ? [P, a[k - 1], p] : []))),
+        new THREE.MeshBasicMaterial({ color: C.angle, transparent: true, opacity: 0.25, side: THREE.DoubleSide, depthWrite: false }));
+      orbitGroup.add(wedge);
+      const al = label(`i = ${(L.i / DEG).toFixed(1)}°`);
+      al.element.style.color = '#ffd54f';
+      al.element.style.fontSize = '15px';
+      al.position.copy(P.clone().add(alongEq.clone().add(alongOrbit).normalize().multiplyScalar(0.45)));
+      orbitGroup.add(al);
+    }
+    const cl = label('the planes cross here', 'small');
+    cl.element.style.color = '#ffd54f';
+    cl.position.copy(nodeDir.clone().multiplyScalar(1.9));
+    orbitGroup.add(cl);
+    eqLabel.position.copy(alongEq.clone().multiplyScalar(-1.04).add(v3(0, -0.06, 0)));
+  } else {
+    eqLabel.position.set(1.05, -0.06, 0);
+  }
+  // The normals: Earth's axis and the orbit's axis; the angle between them is also i.
+  if (document.getElementById('showNormals').checked) {
+    orbitGroup.add(arrow(v3(0, 0, 0), n0, 1.45, C.orbit, 0.01));
+    const onl = label('axis of the orbit', 'small'); onl.element.style.color = '#4fc3f7'; onl.position.copy(n0.clone().multiplyScalar(1.55)); orbitGroup.add(onl);
+    const k = Y.clone().cross(n0);
+    if (k.lengthSq() > 1e-10) {
+      const arc = circlePoints(k.normalize(), Y, 0.55, 0, L.i, 48);
+      orbitGroup.add(tube(arc, 0.006, C.angle));
+    }
+  }
+  // The circle of the site's latitude: what people expect, but it is not around the centre.
+  if (document.getElementById('showParallel').checked) {
+    const r = Math.cos(lat) * RO, y = Math.sin(lat) * RO;
+    const pts = [];
+    for (let k = 0; k <= 160; k++) { const a = (k / 160) * 2 * Math.PI; pts.push(v3(Math.cos(a) * r, y, Math.sin(a) * r)); }
+    const par = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lineMat(C.heading, 0.8, true));
+    par.computeLineDistances();
+    orbitGroup.add(par);
+    const hub = new THREE.Mesh(new THREE.SphereGeometry(0.02, 12, 8), new THREE.MeshBasicMaterial({ color: C.heading, depthTest: false }));
+    hub.position.set(0, y, 0);
+    hub.renderOrder = 5;
+    orbitGroup.add(hub);
+    const pl = label('centre of the latitude circle: not Earth\'s centre, so no orbit', 'small');
+    pl.element.style.color = '#ffa24a';
+    pl.position.set(0.05, y + 0.06, 0);
+    orbitGroup.add(pl);
+  }
+
+  // --- The two headings for the wanted tilt.
+  const s = Math.cos(state.want * DEG) / Math.cos(lat);
+  const msg = document.getElementById('wantMsg');
+  state.wantHeadings = null;
+  if (atPole) {
+    // cos φ = 0: every heading gives cos i = 0. From the pole every direction is south.
+    msg.textContent = Math.abs(state.want - 90) < 0.05
+      ? 'At the pole every heading gives 90°.'
+      : `A tilt of ${state.want.toFixed(1)}° cannot be reached from the pole: from there every orbit passes over both poles, so every tilt is 90°.`;
+  } else if (Math.abs(s) > 1) {
+    const low = state.lat, high = 180 - state.lat;
+    msg.textContent = `A tilt of ${state.want.toFixed(1)}° cannot be reached from ${state.lat.toFixed(1)}°: the orbit passes over the site, so it reaches at least ${low.toFixed(1)}° north. From here the tilt is between ${low.toFixed(1)}° (east) and ${high.toFixed(1)}° (west).`;
+  } else {
+    const a1 = Math.asin(s), a2 = Math.PI - a1;
+    // For a tilt above 90°, sin A is negative: the headings point west.
+    const norm = (a) => ((a / DEG) % 360 + 360) % 360;
+    state.wantHeadings = [norm(a1), norm(a2)];
+    msg.textContent = `Two headings give ${state.want.toFixed(1)}°: ${state.wantHeadings[0].toFixed(1)}° and ${state.wantHeadings[1].toFixed(1)}°. Both make the same tilt: one leaves toward the north, the other toward the south.`;
+    if (document.getElementById('showWant').checked) {
+      const lift2 = L.up.clone().multiplyScalar(R + 0.009);
+      for (const h of state.wantHeadings) {
+        const dir = L.north.clone().multiplyScalar(Math.cos(h * DEG)).addScaledVector(L.east, Math.sin(h * DEG));
+        wantGroup.add(arrow(lift2, dir, 0.3, C.target, 0.007));
+        const wl = label(`${h.toFixed(1)}°`, 'small');
+        wl.element.style.color = '#f06292';
+        wl.position.copy(lift2.clone().addScaledVector(dir, 0.36));
+        wantGroup.add(wl);
+        const nn = L.up.clone().cross(dir).normalize();
+        const ring = new THREE.Line(new THREE.BufferGeometry().setFromPoints(circlePoints(nn, L.up, RO * 1.015)), lineMat(C.target, 0.55, true));
+        ring.computeLineDistances();
+        wantGroup.add(ring);
+      }
+    }
+  }
+  document.getElementById('useNE').disabled = document.getElementById('useSE').disabled = !state.wantHeadings;
+
+  // --- The numbers.
+  const sinA = Math.sin(A), cosL = Math.cos(lat), cosI = sinA * cosL;
+  document.getElementById('latV').textContent = `${state.lat.toFixed(1)}°`;
+  document.getElementById('headV').textContent = `${state.head.toFixed(1)}°`;
+  document.getElementById('wantV').textContent = `${state.want.toFixed(1)}°`;
+  document.getElementById('eq').innerHTML =
+    `cos <span class="a">i</span> = sin <span class="h">A</span> · cos <span class="l">φ</span><br>`
+    + `= sin <span class="h">${state.head.toFixed(1)}°</span> · cos <span class="l">${state.lat.toFixed(1)}°</span><br>`
+    + `= <span class="h">${sinA.toFixed(3)}</span> · <span class="l">${cosL.toFixed(3)}</span> = ${(Math.abs(cosI) < 5e-4 ? 0 : cosI).toFixed(3)}`;
+  document.getElementById('iV').textContent = `i = ${(L.i / DEG).toFixed(1)}°`;
+  const kind = L.i / DEG < 0.05 ? 'along the equator' : L.i / DEG > 90.05 ? 'against Earth\'s turn (retrograde)' : Math.abs(L.i / DEG - 90) < 0.05 ? 'over both poles' : 'with Earth\'s turn (prograde)';
+  document.getElementById('why').innerHTML =
+    `<p>The orbit is a flat circle around Earth's centre, and it passes over the launch site. So its highest point is at least as far north as the site: <b>the tilt is never less than the latitude</b>.</p>`
+    + `<p>Only the <b style="color:#9be7a6">east part</b> of the heading keeps the orbit near the equator. Flying due east (sin A = 1) gives the smallest tilt, i = φ, and puts the site at the orbit's highest point. Turning toward north or south makes the tilt larger.</p>`
+    + `<p>This orbit goes ${kind}.</p>`
+    + (atPole ? '<p><b>At the pole</b> cos φ = 0, so every heading gives the same tilt: 90°. From the pole every direction is south, and an orbit through the pole passes over both poles.</p>' : '');
+}
+
+// ---------- Controls ----------
+const bind = (id, key) => document.getElementById(id).addEventListener('input', (e) => { state[key] = Number(e.target.value); restartFlight(); build(); });
+bind('lat', 'lat');
+bind('head', 'head');
+bind('want', 'want');
+for (const id of ['showPlanes', 'showNormals', 'showParallel', 'showParts', 'showWant']) document.getElementById(id).addEventListener('change', build);
+document.getElementById('spin').addEventListener('change', (e) => { state.spin = e.target.checked; restartFlight(); build(); });
+const set = (key, value) => { state[key] = value; document.getElementById(key === 'head' ? 'head' : key).value = value; restartFlight(); build(); };
+for (const b of document.querySelectorAll('[data-lat]')) b.addEventListener('click', () => set('lat', Number(b.dataset.lat)));
+for (const b of document.querySelectorAll('[data-head]')) b.addEventListener('click', () => set('head', Number(b.dataset.head)));
+for (const b of document.querySelectorAll('[data-want]')) b.addEventListener('click', () => set('want', Number(b.dataset.want)));
+document.getElementById('useNE').addEventListener('click', () => state.wantHeadings && set('head', state.wantHeadings[0]));
+document.getElementById('useSE').addEventListener('click', () => state.wantHeadings && set('head', state.wantHeadings[1]));
+
+/** A new launch: Earth back where it was, the orbit through the site, the satellite at the site. */
+function restartFlight() {
+  state.angle = 0;
+  state.launchAngle = 0;
+  state.satT = 0;
+  earth.rotation.y = 0;
+}
+
+// On a phone the controls open from a button, and start closed so the globe can be seen.
+const panel = document.getElementById('controls');
+if (matchMedia('(max-width: 640px)').matches) panel.classList.add('closed');
+document.getElementById('toggle').addEventListener('click', () => panel.classList.toggle('closed'));
+
+// Camera views.
+let fly = null;
+function view(pos, dur = 1.2) { fly = { from: camera.position.clone(), to: pos, t0: performance.now(), dur: dur * 1000 }; }
+document.getElementById('vFree').addEventListener('click', () => view(v3(3.6, 2.2, 4.2)));
+document.getElementById('vSite').addEventListener('click', () => {
+  const L = launch(state.lat * DEG, state.head * DEG);
+  view(L.up.clone().applyAxisAngle(Y, earth.rotation.y).multiplyScalar(2.4).add(v3(0, 0.15, 0)));
+});
+document.getElementById('vEdge').addEventListener('click', () => {
+  // Along the line where the planes cross: both planes are seen edge on, as two lines, and the
+  // angle between the lines is the tilt.
+  const L = launch(state.lat * DEG, state.head * DEG);
+  const n0 = L.n.clone().applyAxisAngle(Y, state.launchAngle);
+  const node = Y.clone().cross(n0);
+  view((node.lengthSq() > 1e-8 ? node.normalize() : v3(1, 0, 0)).multiplyScalar(5.2).add(v3(0, 0.001, 0)));
+});
+document.getElementById('vPole').addEventListener('click', () => view(v3(0.001, 5.2, 0.001)));
+
+// ---------- Frame ----------
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (fly) {
+    const k = Math.min(1, (now - fly.t0) / fly.dur);
+    const e = k < 0.5 ? 2 * k * k : 1 - (-2 * k + 2) ** 2 / 2;
+    // Along a curve around the centre, not through Earth.
+    const a = fly.from.clone().normalize(), b = fly.to.clone().normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(a, b);
+    const dir = a.applyQuaternion(new THREE.Quaternion().slerp(q, e));
+    camera.position.copy(dir.multiplyScalar(THREE.MathUtils.lerp(fly.from.length(), fly.to.length(), e)));
+    controls.target.set(0, 0, 0);
+    if (k >= 1) fly = null;
+  }
+  // The satellite flies the orbit: one lap in 8 seconds.
+  const L = launch(state.lat * DEG, state.head * DEG);
+  const turn = new THREE.Quaternion().setFromAxisAngle(Y, state.launchAngle);
+  const up0 = L.up.clone().applyQuaternion(turn), d0 = L.d.clone().applyQuaternion(turn);
+  state.satT += dt * (2 * Math.PI / 8);
+  sat.position.copy(up0.multiplyScalar(Math.cos(state.satT) * RO).addScaledVector(d0, Math.sin(state.satT) * RO));
+  // Earth turns about 16 times slower than a low orbit goes around: as in reality.
+  if (state.spin) {
+    state.angle += dt * (2 * Math.PI / 8) / 16;
+    earth.rotation.y = state.angle;
+  }
+  controls.update();
+  renderer.render(scene, camera);
+  labels.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+build();
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

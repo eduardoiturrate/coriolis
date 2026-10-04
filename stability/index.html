@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stability · Spin</title>
+<meta name="description" content="Why a bicycle stays upright only in a range of speeds, and why a spinning coin whirs faster and faster just before it stops." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, V3, fmt, nums, TAU, DEG } = Spin;
+const G = 9.81;
+
+const app = Spin.app({
+  slug: 'stability',
+  sub: 'Two spinning things that stay up, for a while, and what decides how long.',
+  views: [{ caption: 'The bicycle from behind' }, { caption: 'The bicycle from above' }, { caption: 'How fast each wobble grows or dies', span: 2, short: true }],
+  rows: 'minmax(0, 1fr) minmax(0, 0.62fr)',
+  go: 'Give it a push', speed: { min: 0.2, max: 3, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['bike', 'Bicycle'], ['coin', 'Spinning coin']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('v', { label: 'Speed of the bicycle', min: 0, max: 10, step: 0.1, value: 5, fmt: (v) => `${v.toFixed(1)} m/s (${(v * 3.6).toFixed(0)} km/h)`, show: is('bike') });
+ui.chips([{ text: 'Walking 1.5', set: { v: 1.5 } }, { text: 'Too slow 3', set: { v: 3 } }, { text: 'Just right 5', set: { v: 5 } }, { text: 'Too fast 8', set: { v: 8 } }], { show: is('bike') });
+ui.hint('The bicycle has no rider steering it. It balances only by its own design.', { show: is('bike') });
+ui.seg('size', [['coin', 'A coin (1.2 cm)'], ['disk', 'Euler’s disk (3.8 cm)']], { label: 'Disk', show: is('coin') });
+ui.slider('a0', { label: 'Tilt at the start', min: 10, max: 45, step: 1, value: 30, fmt: (v) => `${v}°`, show: is('coin') });
+ui.slider('t0', { label: 'How long it spins', min: 5, max: 40, step: 1, value: 12, fmt: (v) => `${v} s`, show: is('coin') });
+ui.check('warp', 'Slow down toward the end, so you can watch it', true, { show: is('coin') });
+ui.check('sound', 'Sound: the whir, shifted up so it is easy to hear', false, { show: is('coin') });
+
+// ---------- The benchmark bicycle ----------
+// The matrices are those of the benchmark bicycle in Meijaard and others (2007). The roll angle and the steer angle
+// follow M q'' + v C1 q' + (g K0 + v^2 K2) q = 0. Without a rider steering, it is stable between about 4.3 and 6.0 m/s.
+
+const BM = [[80.81722, 2.31941332208709], [2.31941332208709, 0.29784188199686]];
+const BC1 = [[0, 33.86641391492494], [-0.85035641456978, 1.68540397397560]];
+const BK0 = [[-80.95, -2.59951685249872], [-2.59951685249872, -0.80329488458618]];
+const BK2 = [[0, 76.59734589573222], [0, 2.65431523794604]];
+const WHEELBASE = 1.02, HEAD = Math.PI / 10;
+const det = BM[0][0] * BM[1][1] - BM[0][1] * BM[1][0];
+const Mi = [[BM[1][1] / det, -BM[0][1] / det], [-BM[1][0] / det, BM[0][0] / det]];
+const mul2 = (a, b) => [[a[0][0] * b[0][0] + a[0][1] * b[1][0], a[0][0] * b[0][1] + a[0][1] * b[1][1]], [a[1][0] * b[0][0] + a[1][1] * b[1][0], a[1][0] * b[0][1] + a[1][1] * b[1][1]]];
+function sysMatrix(v) {
+  const K = BK0.map((r, i) => r.map((x, j) => G * x + v * v * BK2[i][j]));
+  const Cm = BC1.map((r) => r.map((x) => v * x));
+  const a = mul2(Mi, K), b = mul2(Mi, Cm);
+  return [[0, 0, 1, 0], [0, 0, 0, 1], [-a[0][0], -a[0][1], -b[0][0], -b[0][1]], [-a[1][0], -a[1][1], -b[1][0], -b[1][1]]];
+}
+/** The four numbers that say how fast each wobble grows (real part) and turns (imaginary part). */
+function eigen(v) {
+  const A = sysMatrix(v), n = 4, mm = (a, b) => a.map((r) => b[0].map((_, j) => r.reduce((s, x, k) => s + x * b[k][j], 0)));
+  const tr4 = (m) => m.reduce((s, r, i) => s + r[i], 0);
+  let Mc = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  const c = [1];
+  for (let k = 1; k <= n; k++) {
+    const AM = mm(A, Mc), ck = -tr4(AM) / k;
+    c.push(ck);
+    Mc = AM.map((r, i) => r.map((x, j) => x + (i === j ? ck : 0)));
+  }
+  let z = Array.from({ length: n }, (_, k) => ({ re: 3 * Math.cos(0.4 + k * 1.57), im: 3 * Math.sin(0.4 + k * 1.57) }));
+  const cm = (a, b) => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re });
+  for (let it = 0; it < 120; it++) {
+    z = z.map((zi, i) => {
+      let acc = { re: c[0], im: 0 };
+      for (let k = 1; k <= n; k++) { const t = cm(acc, zi); acc = { re: t.re + c[k], im: t.im }; }
+      let den = { re: 1, im: 0 };
+      z.forEach((zj, j) => { if (j !== i) den = cm(den, { re: zi.re - zj.re, im: zi.im - zj.im }); });
+      const d = den.re * den.re + den.im * den.im || 1e-12;
+      return { re: zi.re - (acc.re * den.re + acc.im * den.im) / d, im: zi.im - (acc.im * den.re - acc.re * den.im) / d };
+    });
+  }
+  return z;
+}
+const SPEEDS = []; for (let v = 0; v <= 10.0001; v += 0.05) SPEEDS.push({ v, z: eigen(v) });
+const worst = (z) => Math.max(...z.map((x) => x.re));
+const stableRange = (() => { const ok = SPEEDS.filter((s) => worst(s.z) < 0); return ok.length ? [ok[0].v, ok[ok.length - 1].v] : [0, 0]; })();
+
+let B = null;
+function initBike() {
+  B = { y: [0, 0, 0.5, 0], t: 0, psi: 0, X: 0, Y: 0, trail: [{ x: 0, y: 0 }], fell: false };
+}
+function stepBike(dt) {
+  const v = ui.v.v, A = sysMatrix(v);
+  const f = (y) => [0, 1, 2, 3].map((i) => A[i][0] * y[0] + A[i][1] * y[1] + A[i][2] * y[2] + A[i][3] * y[3]);
+  const n = Math.max(1, Math.ceil(dt / 0.002)), h = dt / n;
+  for (let i = 0; i < n && !B.fell; i++) {
+    B.y = Spin.rk4(f, B.y, 0, h);
+    B.psi += ((v * B.y[1] * Math.cos(HEAD)) / WHEELBASE) * h;
+    B.X += v * Math.cos(B.psi) * h; B.Y += v * Math.sin(B.psi) * h;
+    if (Math.abs(B.y[0]) > 0.7) B.fell = true;
+  }
+  B.t += dt;
+  B.trail.push({ x: B.X, y: B.Y }); if (B.trail.length > 4000) B.trail.shift();
+}
+
+function drawBike() {
+  if (!B) initBike();
+  if (tr.running && !B.fell) stepBike(tr.dt);
+  if (tr.running && (B.fell || B.t > 14)) tr.finish();
+  const [phi, del] = B.y, v = ui.v.v;
+
+  // Rear view: the bicycle is a stick that can lean, over the point where the tire touches the ground.
+  const p = pens[0].begin().box(-1.5, 1.5, -0.2, 1.9, 10);
+  p.line([{ x: -1.5, y: 0 }, { x: 1.5, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  const up = { x: Math.sin(phi), y: Math.cos(phi) }, side = { x: Math.cos(phi), y: -Math.sin(phi) };
+  const at = (h, s = 0) => ({ x: up.x * h + side.x * s, y: up.y * h + side.y * s });
+  p.line([at(0), at(0.68)], '#8a97ab', 7);
+  p.line([at(0.34, -0.02), at(0.34, 0.02)], '#aeb9c8', 9);
+  p.line([at(0.68), at(1.0)], C.ball, 5);
+  p.line([at(1.0), at(1.52)], 'rgba(240,98,146,0.75)', 8);
+  p.circle(at(1.68), 0.14, { fill: 'rgba(240,98,146,0.55)', stroke: C.friend, width: 2 });
+  const bar = 0.3 * Math.cos(del * 3);
+  p.line([at(1.02, -bar), at(1.02, bar)], C.ink, 4);
+  p.dot(at(1.02, del * 3 * 0.3), '#fff', 4);
+  p.note(B.fell ? 'It fell over' : tr.running ? 'Leaning and steering' : 'Press Give it a push');
+  p.textS(`lean ${(phi / DEG).toFixed(1)}°   steer ${(del / DEG).toFixed(1)}°`, p.cw / 2, p.ch - 14, { color: 'rgba(255,255,255,0.7)', mono: true, size: 11.5 });
+
+  // From above: the trail on the ground, with the bicycle at the middle.
+  const q = pens[1].begin().box(-7, 7, -7, 7, 8);
+  q.c = { x: B.X, y: B.Y };
+  for (let gx = Math.floor(B.X - 8); gx <= B.X + 8; gx++) q.line([{ x: gx, y: B.Y - 8 }, { x: gx, y: B.Y + 8 }], 'rgba(255,255,255,0.05)', 1);
+  for (let gy = Math.floor(B.Y - 8); gy <= B.Y + 8; gy++) q.line([{ x: B.X - 8, y: gy }, { x: B.X + 8, y: gy }], 'rgba(255,255,255,0.05)', 1);
+  q.line(B.trail, C.ink, 2.5);
+  const dir = V.polar(1, B.psi), rear = { x: B.X, y: B.Y }, front = V.add(rear, V.mul(dir, WHEELBASE));
+  q.line([rear, front], '#8a97ab', 3);
+  q.line([V.add(rear, V.mul(dir, -0.33)), V.add(rear, V.mul(dir, 0.33))], '#dfe6f0', 6);
+  const fd = V.polar(1, B.psi + del * Math.cos(HEAD) * 3);
+  q.line([V.add(front, V.mul(fd, -0.33)), V.add(front, V.mul(fd, 0.33))], C.ball, 6);
+  q.note('The ground slides by. The trail shows where it has been.');
+
+  // The chart for all speeds.
+  const r = pens[2].begin();
+  const ch = r.chart({ x: 4, y: 2, w: r.cw - 8, h: r.ch - 4 }, { x0: 0, x1: 10, y0: -6, y1: 6, title: 'Growth rate of each wobble (per second) against speed (m/s). Above the line it grows.', xTicks: 10, yTicks: 6, padB: 24 });
+  ch.band(stableRange[0], stableRange[1], 'rgba(155,231,166,0.16)');
+  ch.hline(0, 'rgba(255,255,255,0.6)', [1, 0]);
+  for (const s of SPEEDS) for (const z of s.z) ch.dot(s.v, z.re, Math.abs(z.im) > 1e-3 ? C.ink : C.ball, 1.7);
+  ch.vline(v, '#fff', [4, 4], 1.6);
+  ch.text('stable', (stableRange[0] + stableRange[1]) / 2, 5.2, { align: 'center', color: C.you, size: 11.5 });
+  ch.text('weave: orange, grows below', stableRange[0] - 0.15, -4.5, { align: 'right', size: 10.5, color: C.ink });
+  ch.text('capsize: blue, grows above', stableRange[1] + 0.15, -4.5, { align: 'left', size: 10.5, color: C.ball });
+
+  const zs = eigen(v), g = worst(zs);
+  const state = g < -1e-3 ? 'stable' : g > 0 ? (zs.some((z) => z.re === g && Math.abs(z.im) > 1e-3) ? 'weaves, growing' : 'falls over') : 'borderline';
+  app.explain(`${nums([['speed', `${v.toFixed(1)}`, 'm/s'], ['this speed is', state], ['slowest wobble changes by', `${Math.exp(g).toFixed(2)}×`, 'each second']])}
+    <p>A bicycle with nobody on it can balance itself between about <b>${stableRange[0].toFixed(1)}</b> and <b>${stableRange[1].toFixed(1)} m/s</b> (this is the standard test bicycle, and its numbers are real). Give it a push and it leans one way. It then steers by itself <b>toward the lean</b>, so the wheels go back under the center of mass, and the lean dies out. That works because of the shape of the front fork (the wheel touches the ground behind the steering axis), the way the mass is spread, and the turning wheels.</p>
+    <p>Too slow, and it falls over like a broom balanced on a hand, faster than the steering can catch it. Too fast, and it slowly leans over in one direction (capsize), but so slowly that a rider can easily hold it. At the edge of the stable range it weaves from side to side. A rider can balance well below this speed by steering, which is what you do when you ride slowly.</p>`);
+}
+
+// ---------- Spinning coin (Euler's disk) ----------
+// Moffatt's model of a disk on a table: a quarter of the way into the spin it tilts at an angle α and its contact point
+// circles at a rate Ω with Ω² = 4 g / (a α). Losses reduce α as (time left)^(1/3), so Ω grows as (time left)^(−1/6)
+// and would reach infinity at a finite time.
+
+const cam = new Spin.Cam3(pens[0], { az: 0.6, el: 0.5, dist: 4.6, fov: 36, min: 2.5, max: 9, target: { x: 0, y: 0, z: 0.2 } });
+const tone = Spin.tone();
+let coinPhase = 0, coinSpin = 0, lastReal = performance.now();
+const PTOT = 16;
+
+function coinState() {
+  const { size, a0, t0, warp } = ui.v;
+  const a = size === 'disk' ? 0.038 : 0.012;
+  const p = Math.min(1, tr.running || tr.endedAt ? tr.t / PTOT : 0);
+  const frac = warp ? 10 ** (-6.3 * p) : Math.max(2e-7, 1 - p);
+  const tau = t0 * frac;
+  const alpha = a0 * DEG * Math.cbrt(frac);
+  const omega = Math.sqrt((4 * G) / (a * alpha));
+  const omega0 = Math.sqrt((4 * G) / (a * a0 * DEG));
+  return { a, tau, alpha, omega, omega0, t0, p, frac };
+}
+
+function drawCoin(real) {
+  const s = coinState();
+  if (tr.running && tr.t > PTOT * 1.08) tr.finish();
+  // The picture turns at a rate that rises with the real one, but never faster than the screen can show.
+  const vis = Math.min(5, 0.7 * (s.omega / s.omega0));
+  coinPhase += TAU * vis * real;
+  coinSpin = -coinPhase * Math.cos(s.alpha);
+  const p = pens[0].begin(); cam.begin();
+  const ring = []; for (let k = 0; k <= 60; k++) ring.push({ x: 1.6 * Math.cos((k / 60) * TAU), y: 1.6 * Math.sin((k / 60) * TAU), z: 0 });
+  cam.line(ring, 'rgba(155,231,166,0.45)', 1.5);
+  for (let k = 0; k < 8; k++) cam.line([{ x: 0, y: 0, z: 0 }, { x: 1.6 * Math.cos((k * TAU) / 8), y: 1.6 * Math.sin((k * TAU) / 8), z: 0 }], 'rgba(155,231,166,0.12)', 1);
+  const sa = Math.sin(s.alpha), ca = Math.cos(s.alpha);
+  const ph = coinPhase;
+  const c = { x: 0, y: 0, z: sa };
+  const d = { x: ca * Math.cos(ph), y: ca * Math.sin(ph), z: -sa }; // from the center down the slope to the rim at the table
+  const t = { x: -Math.sin(ph), y: Math.cos(ph), z: 0 };
+  const at = (ang) => V3.add(c, V3.add(V3.mul(d, Math.cos(ang)), V3.mul(t, Math.sin(ang))));
+  const rim = []; for (let k = 0; k < 64; k++) rim.push(at((k / 64) * TAU));
+  const contact = { x: ca * Math.cos(ph), y: ca * Math.sin(ph), z: 0 };
+  const path = []; for (let k = 0; k <= 60; k++) path.push({ x: ca * Math.cos((k / 60) * TAU), y: ca * Math.sin((k / 60) * TAU), z: 0.002 });
+  cam.line(path, 'rgba(255,162,74,0.55)', 2, [4, 5]);
+  cam.faces([{ pts: rim, fill: 'rgba(201,211,223,0.38)', stroke: '#dfe6f0', width: 3 }]);
+  for (let k = 0; k < 6; k++) cam.line([c, at(coinSpin + (k * TAU) / 6)], k === 0 ? C.ink : 'rgba(255,255,255,0.35)', k === 0 ? 3 : 1.2);
+  cam.dot(contact, C.ink, 6);
+  cam.dot({ x: 0, y: 0, z: 0.002 }, 'rgba(255,255,255,0.5)', 3);
+  p.note(s.frac < 1e-3 ? 'It whirs faster and faster, then stops with a shudder' : 'The rim rolls around while the middle hardly moves');
+
+  const q = pens[1].begin();
+  const w = q.cw - 12, h = q.ch / 2 - 4;
+  const xLo = -Math.log10(s.t0), xHi = 6.5;
+  const full = (fn) => { const o = []; for (let x = xLo; x <= xHi; x += 0.05) { const frac = 10 ** (-x) / s.t0; o.push({ x, y: fn(frac) }); } return o; };
+  const fHz = (frac) => Math.log10(Math.sqrt((4 * G) / (s.a * ui.v.a0 * DEG * Math.cbrt(frac))) / TAU);
+  const aDeg = (frac) => Math.log10((ui.v.a0 * Math.cbrt(frac)));
+  const xNow = -Math.log10(s.tau);
+  const timeFmt = (v) => { const t = 10 ** -v; return t >= 1 ? `${+t.toPrecision(2)} s` : t >= 1e-3 ? `${+(t * 1e3).toPrecision(2)} ms` : `${+(t * 1e6).toPrecision(2)} µs`; };
+  const c1 = q.chart({ x: 6, y: 4, w, h }, { x0: xLo, x1: xHi, y0: Math.floor(fHz(1) * 10) / 10 - 0.05, y1: fHz(1e-7) + 0.1, title: 'Whirring rate (turns a second) against time left', xTicks: 6, yTicks: 4, fmtX: timeFmt, fmtY: (v) => `${+(10 ** v).toPrecision(2)}`, padB: 22 });
+  const pf = full(fHz);
+  c1.line(pf, 'rgba(79,195,247,0.3)', 2);
+  c1.line(pf.filter((o) => o.x <= xNow), C.ball, 3); c1.dot(xNow, fHz(s.frac), C.ink, 6);
+  const c2 = q.chart({ x: 6, y: 8 + h, w, h }, { x0: xLo, x1: xHi, y0: Math.log10(ui.v.a0 * Math.cbrt(1e-7)) - 0.1, y1: Math.log10(ui.v.a0) + 0.1, title: 'Tilt of the disk (degrees) against time left', xTicks: 6, yTicks: 4, fmtX: timeFmt, fmtY: (v) => `${+(10 ** v).toPrecision(2)}`, padB: 22 });
+  const pa = full(aDeg);
+  c2.line(pa, 'rgba(240,98,146,0.3)', 2);
+  c2.line(pa.filter((o) => o.x <= xNow), C.friend, 3); c2.dot(xNow, aDeg(s.frac), C.ink, 6);
+
+  if (ui.v.sound) tone.set(Math.min(3000, 15 * (s.omega / TAU)), tr.running ? 0.07 : 0); else tone.off();
+  app.explain(`${nums([['time left', timeFmt(xNow)], ['tilt', `${(s.alpha / DEG).toFixed(s.alpha / DEG < 1 ? 2 : 1)}°`], ['whirring', `${(s.omega / TAU).toFixed(1)}`, 'turns a second']])}
+    <p>A spinning coin does not simply slow down. As it loses energy, the angle between it and the table shrinks, and the point where it touches the table circles faster and faster: a rising whirr that ends in a sudden shudder as the coin falls flat. It looks like a countdown. In a simple model the rate would become infinite at a fixed time (a "finite-time singularity"), and in a real coin it is stopped by the last bit of roughness.</p>
+    <p>The straight lines in the log charts show it: the tilt falls as the cube root of the time left, and the whirring rate rises as the sixth root. Time runs left to right on these charts, but the scale is the time that remains, so the last moments take up half of the picture.</p>`);
+}
+
+// ---------- Modes ----------
+
+function setupMode() {
+  const m = ui.v.mode;
+  if (m === 'bike') { app.show(3, 2); app.layout(2, 'minmax(0, 1fr) minmax(0, 0.62fr)'); app.caption(0, 'The bicycle from behind'); app.caption(1, 'The bicycle from above'); tr.setGo('Give it a push'); }
+  else { app.show(2, 2); app.layout(2, 'minmax(0, 1fr)'); app.caption(0, 'The coin (drag to turn the view)'); app.caption(1, 'The same, on log scales'); tr.setGo('Spin it'); }
+  tr.loopBox.parentElement.hidden = false;
+  tr.reset(); B = null; coinPhase = 0;
+  if (m === 'bike') initBike();
+}
+ui.on((id) => {
+  if (id === 'mode') { setupMode(); return; }
+  if (id === 'sound') { if (ui.v.sound) tone.on(); return; }
+  tr.reset(); coinPhase = 0;
+  if (ui.v.mode === 'bike') initBike();
+});
+tr.onStart = () => { if (ui.v.mode === 'bike') initBike(); coinPhase = 0; };
+Spin.run((now) => {
+  const real = Math.min(0.1, (now - lastReal) / 1000); lastReal = now;
+  tr.step(now);
+  if (ui.v.mode === 'bike') drawBike(); else drawCoin(real);
+});
+setupMode();
+</script>
+</body>
+</html>

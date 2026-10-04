@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tides and tidal locking · Spin</title>
+<meta name="description" content="Why there are two tides a day, why the Sun and Moon together make spring and neap tides, and why the Moon always shows us the same face." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, fmt, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'tides',
+  sub: 'Gravity pulls less on the far side of a body than on the near side. The difference stretches the body, and a stretched body that turns drags on its own bulge.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Restart', loop: false, speed: { min: 0.2, max: 3, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['bulge', 'Two tides a day'], ['lock', 'The same face']]);
+const is = (m) => (v) => v.mode === m;
+
+ui.slider('eps', { label: 'How much the picture stretches the oceans', min: 0.04, max: 0.3, step: 0.01, value: 0.14, fmt: (v) => `${Math.round(v * 100)}%`, show: is('bulge'), hint: 'The real stretch is far smaller than this, and the Moon is much farther away. The picture is not to scale.' });
+ui.check('sun', 'Include the Sun', false, { show: is('bulge') });
+ui.slider('ph', { label: 'Phase of the Moon at the start', min: 0, max: 345, step: 15, value: 90, fmt: (v) => `${v}° (${['new Moon', 'first quarter', 'full Moon', 'last quarter'][Math.round(v / 90) % 4]})`, show: (v) => v.mode === 'bulge' && v.sun });
+ui.chips([{ text: 'New', set: { ph: 0 } }, { text: 'First quarter', set: { ph: 90 } }, { text: 'Full', set: { ph: 180 } }, { text: 'Last quarter', set: { ph: 270 } }], { show: (v) => v.mode === 'bulge' && v.sun });
+ui.slider('s', { label: 'Turns of the Moon on its own axis, for each trip around Earth', min: -1, max: 3, step: 0.05, value: 0, fmt: (v) => v.toFixed(2), show: is('lock') });
+ui.chips([{ text: 'Not turning 0', set: { s: 0 } }, { text: 'Same face 1', set: { s: 1 } }, { text: 'Mercury 1.5', set: { s: 1.5 } }, { text: 'Twice 2', set: { s: 2 } }, { text: 'Backward −1', set: { s: -1 } }], { show: is('lock') });
+ui.check('act', 'Let tides act on the Moon’s spin', false, { show: is('lock') });
+
+ui.on((id) => { if (id === 'mode') setup(); tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  tr.setGo('Restart');
+  app.caption(0, m === 'bulge' ? 'Looking down on the north pole (not to scale)' : 'Seen from space, not turning');
+  app.caption(1, m === 'bulge' ? 'The pull of the Moon, as it differs across Earth' : 'Seen from a frame that turns with the Moon’s orbit');
+}
+
+// ---------- Tides ----------
+
+const MOON_AMP = 0.27, SUN_AMP = 0.125; // metres, if the oceans covered the whole Earth and could follow the pull
+const MOON_ORBIT = 27.32, YEAR = 365.25;
+
+function drawBulge() {
+  const { eps, sun } = ui.v;
+  const days = tr.t / 8;
+  const t0Moon = 0.9 + ui.v.ph * DEG;
+  const th = (TAU * days) / MOON_ORBIT * 1 + t0Moon;
+  const ths = (TAU * days) / YEAR + 0.9;
+  const ang = TAU * days * 1.0027;
+  const you = ang + 0.5;
+  const rs = sun ? 0.46 : 0;
+  const bulge = (a) => eps * (Math.cos(2 * (a - th)) + rs * Math.cos(2 * (a - ths)));
+  const L = pens[0].begin().box(-4.2, 4.2, -3.6, 3.6, 10);
+  L.circle({ x: 0, y: 0 }, 3.4, { stroke: 'rgba(255,255,255,0.1)', width: 1, dash: [4, 6] });
+  const ocean = []; for (let k = 0; k <= 180; k++) { const a = (k / 180) * TAU; ocean.push(V.polar(1.0 + bulge(a), a)); }
+  L.poly(ocean, { fill: 'rgba(79,195,247,0.35)', stroke: C.ball, width: 2 });
+  L.circle({ x: 0, y: 0 }, 0.9, { fill: '#2a4a2e', stroke: 'rgba(155,231,166,0.6)', width: 1.5 });
+  for (let k = 0; k < 7; k++) L.dot(V.polar(0.62, ang + k * 0.9 + (k % 2) * 0.2), 'rgba(155,231,166,0.55)', 5);
+  L.line([{ x: 0, y: 0 }, V.polar(0.9, ang)], 'rgba(255,255,255,0.3)', 1.2);
+  L.circle(V.polar(3.4, th), 0.38, { fill: '#c9d3df', stroke: '#fff', width: 2 });
+  L.text('Moon', V.polar(3.4, th), { dy: -26, size: 11.5 });
+  L.arrow(V.polar(1.5, th), V.polar(0.9, th), 'rgba(201,211,223,0.7)', 2.5);
+  if (sun) { const sd = V.polar(1, ths); L.arrow(V.mul(sd, 3.6), V.mul(sd, 0.6), C.spin, 3, ''); L.text('to the Sun', V.mul(sd, 4.1), { size: 11, color: C.spin }); }
+  const yp = V.polar(1 + bulge(you) + 0.0, you);
+  L.dot(yp, C.ink, 7); L.text('you', V.polar(1.35, you), { size: 11.5, color: C.ink });
+  L.arrow({ x: -1.4, y: -2.3 }, { x: 0, y: 0 }, 'rgba(0,0,0,0)', 1);
+  const spinArc = []; for (let k = 0; k <= 16; k++) spinArc.push(V.polar(2.0, 2.4 + (k / 16) * 0.9));
+  L.line(spinArc, 'rgba(255,255,255,0.45)', 2); L.arrow(spinArc[15], V.mul(V.sub(spinArc[16], spinArc[15]), 5), 'rgba(255,255,255,0.45)', 2, '');
+  L.text('Earth turns', V.polar(2.35, 2.85), { size: 11, color: 'rgba(255,255,255,0.55)' });
+  L.note('Two bulges of water: one facing the Moon, one facing away');
+
+  // Right: the pull, as it differs from the pull at the center of Earth.
+  const q = pens[1].begin();
+  const topH = q.ch * 0.58;
+  const R = q.box(-2.5, 2.5, -2.5, 2.5, 8, { x: 0, y: 0, w: q.cw, h: topH });
+  R.circle({ x: 0, y: 0 }, 1, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  const m = V.polar(1, th), sdir = V.polar(1, ths);
+  const tide = (p) => {
+    const a = V.sub(V.mul(m, 3 * V.dot(p, m)), p);
+    const b = rs ? V.mul(V.sub(V.mul(sdir, 3 * V.dot(p, sdir)), p), rs) : { x: 0, y: 0 };
+    return V.add(a, b);
+  };
+  for (const [rad, n] of [[1.35, 20], [1.95, 24]]) for (let k = 0; k < n; k++) {
+    const p = V.polar(rad, (k / n) * TAU), a = tide(p);
+    const len = V.len(a);
+    R.arrow(p, V.mul(V.norm(a), Math.min(0.5, 0.2 * len)), len > 1.5 ? C.ink : C.ball, 2.4);
+  }
+  R.arrow(V.mul(m, 2.35), V.mul(m, 0.2), '#c9d3df', 3, '');
+  R.text('toward the Moon', V.mul(m, 2.35), { dy: -12, size: 10.5, color: 'rgba(201,211,223,0.8)' });
+  R.note('Stretched along the line to the Moon, squeezed across it');
+  const hAt = (d) => { return MOON_AMP * Math.cos(2 * (TAU * d * 1.0027 + 0.5 - ((TAU * d) / MOON_ORBIT + t0Moon))) + (sun ? SUN_AMP * Math.cos(2 * (TAU * d * 1.0027 + 0.5 - ((TAU * d) / YEAR + 0.9))) : 0); };
+  const dmax = Math.max(3, days), dmin = dmax - 3;
+  const ch = q.chart({ x: 4, y: topH + 4, w: q.cw - 8, h: q.ch - topH - 8 }, { x0: dmin, x1: dmax, y0: -0.45, y1: 0.45, title: 'Height of the water at your place (m) against time (days)', xTicks: 6, yTicks: 4, fmtX: (v) => v.toFixed(1), fmtY: (v) => v.toFixed(1), padB: 22 });
+  const pts = []; for (let d = Math.max(0, dmin); d <= days + 1e-9; d += 0.01) pts.push({ x: d, y: hAt(d) });
+  ch.hline(0, 'rgba(255,255,255,0.35)', [1, 0]);
+  ch.line(pts, C.ball, 2.8); ch.dot(days, hAt(days), C.ink, 5.5);
+  const phase = (((th - ths) % TAU) + TAU) % TAU;
+  const bin = Math.round(phase / (Math.PI / 2)) % 4;
+  const pn = ['new Moon', 'first quarter', 'full Moon', 'last quarter'][bin];
+  const sp = bin % 2 === 0 ? 'spring tides (largest)' : 'neap tides (smallest)';
+  app.explain(`${nums([['time between high tides', '12 h 25 min'], ['Moon alone: low to high', `${(2 * MOON_AMP).toFixed(2)}`, 'm'], ...(sun ? [['Moon phase', pn], ['tides now are', sp]] : [['Sun adds up to', `${(2 * SUN_AMP).toFixed(2)}`, 'm']])])}
+    <p>The Moon pulls on the near side of Earth more strongly than on the center, and on the center more strongly than on the far side. Compared with the center, the near water is pulled <b>toward</b> the Moon, and the far water is left <b>behind</b>. So the sea is stretched into <b>two bulges</b>, one facing the Moon and one facing away. (The arrows on the right show this difference: outward along the line to the Moon, inward across it.)</p>
+    <p>Earth turns once a day under the bulges, so each place passes through two high tides and two low tides. The Moon moves on while Earth turns, so the cycle takes 24 h 50 min, and the tides come about 50 minutes later each day. The Sun does the same, with about 46% of the force. When Sun and Moon line up (new and full Moon) their bulges add: <b>spring tides</b>. At quarter Moon they work against each other: <b>neap tides</b>. Turn on the Sun to see it. Real tides are much larger in some bays, because the water there swings at a rhythm close to the tide: resonance.</p>`);
+}
+
+// ---------- The same face ----------
+
+let s0 = 0, lockT = 0;
+function drawLock() {
+  const { s, act } = ui.v;
+  const T = 8, orbitR = 2.6;
+  const theta = (TAU * tr.t) / T;
+  const tau = 9; // in the picture, tides need this many seconds of animation
+  const sNow = act ? 1 + (s - 1) * Math.exp(-tr.t / tau) : s;
+  // Spin angle: the integral of s over the orbit angle. With a changing s this is a running sum.
+  if (!drawLock.last || tr.t < drawLock.last.t) drawLock.last = { t: 0, phi: 0 };
+  const dt = tr.t - drawLock.last.t;
+  drawLock.last = { t: tr.t, phi: drawLock.last.phi + sNow * (TAU / T) * dt };
+  const phi = act ? drawLock.last.phi : s * theta;
+  const L = pens[0].begin().box(-3.5, 3.5, -3.5, 3.5, 10);
+  L.circle({ x: 0, y: 0 }, 0.7, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  L.text('Earth', { x: 0, y: 0 }, { size: 11.5 });
+  L.circle({ x: 0, y: 0 }, orbitR, { stroke: 'rgba(255,255,255,0.14)', width: 1, dash: [4, 6] });
+  const mp = V.polar(orbitR, theta);
+  const moon = (pen, c, face, ang) => {
+    pen.circle(c, 0.46, { fill: '#4b5565', stroke: '#fff', width: 2 });
+    const half = []; for (let k = 0; k <= 24; k++) half.push(V.add(c, V.polar(0.46, face - Math.PI / 2 + (k / 24) * Math.PI)));
+    pen.poly(half, { fill: '#e8edf5' });
+    pen.line([c, V.add(c, V.polar(0.62, face))], C.ink, 3);
+    pen.dot(V.add(c, V.polar(0.46, face)), C.ink, 4.5);
+  };
+  moon(L, mp, phi, 0);
+  const toEarth = Math.atan2(-mp.y, -mp.x);
+  L.line([mp, V.add(mp, V.polar(1.3, toEarth))], 'rgba(255,255,255,0.35)', 1.2, [3, 4]);
+  L.note(Math.abs(sNow - 1) < 0.03 ? 'The same face always points at Earth' : 'The face turns toward different directions');
+
+  const R = pens[1].begin().box(-3.5, 3.5, -3.5, 3.5, 10);
+  R.circle({ x: 0, y: 0 }, 0.7, { fill: '#14365e', stroke: '#c9d3df', width: 2 });
+  R.text('Earth', { x: 0, y: 0 }, { size: 11.5 });
+  const mr = { x: orbitR, y: 0 };
+  R.line([{ x: 0, y: 0 }, mr], 'rgba(255,255,255,0.14)', 1, [4, 6]);
+  const faceRel = phi - theta; // the face, against the line to Earth (which is at 180 degrees here)
+  if (act) {
+    const lag = Math.max(-0.7, Math.min(0.7, (sNow - 1) * 0.5));
+    const bAng = Math.PI + lag;
+    const bul = []; for (let k = 0; k <= 60; k++) { const a = (k / 60) * TAU, r = 0.46 * (1 + 0.28 * Math.cos(2 * (a - bAng))); bul.push(V.add(mr, V.polar(r, a))); }
+    R.poly(bul, { fill: 'rgba(79,195,247,0.2)', stroke: C.ball, width: 2 });
+    R.text('tidal bulge', V.add(mr, V.polar(0.9, bAng + 0.9)), { size: 10.5, color: C.ball });
+    if (Math.abs(sNow - 1) > 0.04) R.arrow(V.add(mr, V.polar(0.62, bAng)), V.mul(V.polar(1, bAng + (lag > 0 ? -1 : 1) * Math.PI / 2), 0.45), C.friend, 3, 'Earth pulls it back');
+  }
+  moon(R, mr, Math.PI + faceRel, 0);
+  R.line([mr, V.add(mr, V.polar(1.3, Math.PI))], 'rgba(255,255,255,0.35)', 1.2, [3, 4]);
+  R.note(Math.abs(sNow - 1) < 0.03 ? 'Here the Moon does not turn at all' : 'Here the Moon turns on the spot');
+
+  const rel = sNow - 1;
+  const note = Math.abs(sNow - 1) < 0.03 ? 'locked: it turns exactly once for each trip' : sNow === 0 ? 'not turning at all in space, it shows every side to Earth in each trip' : `turns ${sNow.toFixed(2)} times each trip`;
+  app.explain(`${nums([['the Moon turns', sNow.toFixed(2), 'times each trip'], ['against the orbit', rel.toFixed(2), 'turns each trip'], ['state', Math.abs(rel) < 0.03 ? 'locked' : s === 1.5 && !act ? '3:2' : 'not locked']])}
+    <p>The Moon takes the same time to turn once on its axis as to go once around Earth (27.3 days). Because of this, the same face always looks at Earth. Seen from space (left), the bright half of the Moon turns once in every orbit. Seen from the turning frame on the right, the Moon does not turn at all.</p>
+    <p>It did not start this way. Earth stretched the young Moon into a slight bulge, just as the Moon stretches the oceans. If the Moon spins faster or slower than its orbit, the bulge is dragged <b>off the line to Earth</b> (turn on “Let tides act”), and Earth's pull on the dragged bulge makes a torque that slows the spin, or speeds it up, until the bulge sits on the line. Then the torque is zero: the spin is locked. Most large moons are locked. Mercury is stuck in a different resonance, turning 3 times for each 2 orbits. The Moon is moving away from Earth by about 3.8 cm a year, and Earth's day is getting longer by about 2 milliseconds each century, for the same reason.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  if (ui.v.mode === 'bulge') drawBulge(); else drawLock();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>
