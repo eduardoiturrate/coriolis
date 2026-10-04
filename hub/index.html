@@ -28,7 +28,7 @@ const is = (m) => (v) => v.mode === m;
 
 ui.slider('R', { label: 'Radius of the station', min: 20, max: 500, log: true, value: 100, fmt: (v) => `${v} m` });
 ui.slider('gf', { label: 'Gravity at the floor', min: 0.2, max: 2, step: 0.05, value: 1, fmt: (v) => `${v.toFixed(2)} g` });
-ui.slider('rf', { label: 'Where you are, from the axis to the floor', min: 0, max: 1, step: 0.01, value: 0.5, fmt: (v) => `${Math.round(v * 100)}% of the way (${Math.round(v * ui.v.R)} m from the axis)`, show: is('weight') });
+ui.slider('rf', { label: 'Where you are on the pole, from the axis to the floor', min: 0, max: 1, step: 0.01, value: 0.5, fmt: (v) => `${Math.round(v * 100)}% of the way (${Math.round(v * ui.v.R)} m from the axis)`, show: is('weight') });
 ui.chips([{ text: 'At the axis', set: { rf: 0 } }, { text: 'Halfway', set: { rf: 0.5 } }, { text: 'At the floor', set: { rf: 1 } }], { show: is('weight') });
 ui.slider('u', { label: 'Speed you push off at', min: 0.1, max: 3, step: 0.1, value: 1, fmt: (v) => `${v.toFixed(1)} m/s`, show: is('drift') });
 ui.slider('ul', { label: 'Speed you climb down at', min: 0.2, max: 2, step: 0.1, value: 0.6, fmt: (v) => `${v.toFixed(1)} m/s`, show: is('ladder') });
@@ -70,11 +70,15 @@ function drawWeight() {
   for (let k = 0; k < 4; k++) { const a = th + (k * TAU) / 4, q = V.polar(R, a); L.arrow(q, V.mul(V.polar(1, a + Math.PI / 2), R * 0.2), C.ball, 2.6, k === 0 ? `${vrim.toFixed(0)} m/s` : ''); }
   L.circle({ x: 0, y: 0 }, R * 0.05, { fill: '#fff', stroke: '#fff', width: 1 });
   L.text('you, floating at the hub', { x: 0, y: 0 }, { dy: 18, size: 11, color: '#fff' });
+  // A pole from the hub to the floor, turning with the station. You hold on to it. The floor is only the outer ring.
+  L.line([{ x: 0, y: 0 }, V.polar(R * 0.985, th)], '#dfe6f0', 4.5);
+  L.text('pole', V.polar(R * 0.8, th), { dy: -12, size: 11, color: '#dfe6f0' });
+  L.text('floor', V.polar(R * 1.0, th + 0.22), { size: 11, color: C.you });
   if (r > 0.5) {
-    const q = V.polar(r, th);
+    const q = V.polar(r, th), atFloor = ui.v.rf > 0.97;
     L.circle({ x: 0, y: 0 }, r, { stroke: 'rgba(255,162,74,0.35)', width: 1.4, dash: [4, 5] });
     L.arrow(q, V.mul(V.polar(1, th + Math.PI / 2), R * 0.2 * (vfloor / Math.max(vrim, 1e-9))), C.you, 3, '');
-    L.arrow(q, V.mul(V.polar(1, th + Math.PI), R * 0.2 * (gfelt / ui.v.gf)), C.friend, 3.2, 'the floor pushes you in');
+    L.arrow(q, V.mul(V.polar(1, th + Math.PI), R * 0.2 * (gfelt / ui.v.gf)), C.friend, 3.2, atFloor ? 'the floor pushes you in' : 'the pole pushes you in');
     L.dot(q, C.ink, 7);
   }
   L.note('You are not turning: the station turns around you, and the rim rushes past');
@@ -84,9 +88,12 @@ function drawWeight() {
   // You at the hub, seen from the station: you turn the other way.
   Rv.arrow({ x: 0, y: 0 }, V.polar(R * 0.2, -th + 0.5), '#fff', 2.5, '');
   Rv.text('you at the hub turn this way', { x: 0, y: 0 }, { dy: 24, size: 10.5, color: '#fff' });
+  Rv.line([{ x: 0, y: 0 }, { x: R * 0.985, y: 0 }], '#dfe6f0', 4.5);
+  for (let k = 1; k < 20; k++) Rv.line([{ x: (R * k) / 20, y: -R * 0.012 }, { x: (R * k) / 20, y: R * 0.012 }], 'rgba(15,26,43,0.9)', 1.5);
+  Rv.text('pole', { x: R * 0.8, y: 0 }, { dy: -12, size: 11, color: '#dfe6f0' });
   if (r > 0.5) {
     const q = { x: r, y: 0 };
-    Rv.arrow(q, { x: R * 0.2 * (gfelt / ui.v.gf), y: 0 }, C.ink, 3.5, 'weight');
+    Rv.arrow(q, { x: R * 0.2 * (gfelt / ui.v.gf), y: 0 }, C.ink, 3.5, 'weight (you feel pulled down the pole)');
     Rv.dot(q, C.ink, 7);
   }
   Rv.note('The station is still. The stars wheel round, and you at the hub turn');
@@ -99,7 +106,7 @@ function drawWeight() {
   c2.line([{ x: 0, y: 0 }, { x: R, y: vrim }], C.ball, 3); c2.dot(r, vfloor, C.ink, 6.5);
 
   app.explain(`${nums([['weight where you are', `${gfelt.toFixed(2)}`, 'g'], ['floor speed there', `${vfloor.toFixed(1)}`, `m/s (${mph(vfloor).toFixed(0)} mph)`], ['the rim moves at', `${vrim.toFixed(1)}`, `m/s (${mph(vrim).toFixed(0)} mph)`], ['the station turns', `${((w * 60) / TAU).toFixed(2)}`, 'times a minute']])}
-    <p><b>Weight:</b> what you feel as gravity is the floor pushing you around a circle. The push needed is ω²r, so it grows in a straight line with the distance from the axis. At the axis the circle has no size, and there is nothing to push: you feel <b>no gravity</b> there, however fast the station turns. Halfway to the floor you weigh half as much.</p>
+    <p><b>Weight:</b> the station is a drum, and the floor is its outer wall, the green ring. What you feel as gravity is that wall (or, higher up, a pole or ladder that you hold) pushing you around a circle. The push needed is ω²r, so it grows in a straight line with the distance from the axis. Slide down a pole from the hub, and your weight grows as you go. At the axis the circle has no size, and there is nothing to push: you feel <b>no gravity</b> there, however fast the station turns. Halfway down the pole you weigh half as much, and there is no floor there: you stay put only because you hold on.</p>
     <p><b>What you see:</b> if you arrive at the hub not turning (left), the station turns around you, and the rim goes by at ωR, here ${vrim.toFixed(0)} m/s. If you join the turning (right), the station looks still, and the stars and anything outside wheel around you, the other way. Both are right. The rim is moving far too fast to step onto from the hub, which is why the next two modes matter.</p>`);
 }
 
