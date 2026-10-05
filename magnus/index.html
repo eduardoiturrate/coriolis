@@ -38,6 +38,57 @@ ui.chips([
 ui.check('ghost', 'Show the same shot with no spin', true);
 
 const cam = new Spin.Cam3(pens[0], { az: 0.55, el: 0.3, dist: 60, fov: 34, min: 2, max: 300 });
+const AXES = { back: { x: 0, y: -1, z: 0 }, top: { x: 0, y: 1, z: 0 }, left: { x: 0, y: 0, z: 1 }, right: { x: 0, y: 0, z: -1 } };
+
+// The ball close up, in a corner of the 3D view. It uses the same viewing direction as the flight.
+// The turning is slowed down so that the eye can follow it: a real ball turns 9 to 60 times a second.
+let spinPhase = 0, lastNow = performance.now();
+function closeUp(cur, dtReal) {
+  const pen = pens[0], ctx = pen.ctx, { type, rps } = ui.v;
+  const a = AXES[type];
+  const visRps = rps > 0 ? 0.3 + 1.2 * (rps / 60) : 0;
+  if (!tr.paused) spinPhase += TAU * visRps * dtReal * tr.speed;
+  const size = Math.min(176, 0.38 * Math.min(pen.cw, pen.ch)), x0 = 10, y0 = 34;
+  const cx = (x0 + size / 2) * pen.dpr, cy = (y0 + size / 2) * pen.dpr, rpx = 0.2 * size * pen.dpr;
+  const keep = { dist: cam.dist, target: cam.target };
+  cam.target = { x: 0, y: 0, z: 0 };
+  cam.dist = (0.5 * Math.min(pen.w, pen.h) / Math.tan(cam.fov / 2)) / rpx;
+  cam.begin();
+  ctx.save();
+  ctx.fillStyle = 'rgba(5,8,15,0.9)'; ctx.fillRect(x0 * pen.dpr, y0 * pen.dpr, size * pen.dpr, size * pen.dpr);
+  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = pen.px(1); ctx.strokeRect(x0 * pen.dpr, y0 * pen.dpr, size * pen.dpr, size * pen.dpr);
+  ctx.beginPath(); ctx.rect(x0 * pen.dpr, y0 * pen.dpr, size * pen.dpr, size * pen.dpr); ctx.clip();
+  ctx.translate(cx - pen.w / 2, cy - pen.h / 2);
+  // the ball: a shaded disc, with seams that turn about the spin axis
+  const lx = pen.w / 2, ly = pen.h / 2;
+  const g = ctx.createRadialGradient(lx - 0.35 * rpx, ly - 0.35 * rpx, 0.1 * rpx, lx, ly, rpx);
+  g.addColorStop(0, '#f1f4f9'); g.addColorStop(1, '#6f7f93');
+  cam.line([V3.mul(a, -1.5), V3.mul(a, 1.5)], 'rgba(255,213,79,0.45)', 1.3, [3, 4]);
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(lx, ly, rpx, 0, TAU); ctx.fill();
+  const e1 = V3.norm(V3.cross(a, Math.abs(a.z) < 0.9 ? { x: 0, y: 0, z: 1 } : { x: 1, y: 0, z: 0 })), e2 = V3.cross(a, e1);
+  const on = (lam, phi) => { const c = Math.cos(phi), s = Math.sin(phi); return V3.add(V3.mul(V3.add(V3.mul(e1, Math.cos(lam)), V3.mul(e2, Math.sin(lam))), c), V3.mul(a, s)); };
+  const runs = (pts, color, w) => {                                 // only the part of the line on the near side
+    let run = [];
+    const flush = () => { if (run.length > 1) cam.line(run, color, w); run = []; };
+    for (const p of pts) { if (V3.dot(p, cam.pos) > 1) run.push(p); else flush(); }
+    flush();
+  };
+  for (const phi of [-0.9, -0.45, 0, 0.45, 0.9]) { const ring = []; for (let k = 0; k <= 48; k++) ring.push(on((k / 48) * TAU, phi)); runs(ring, 'rgba(25,35,52,0.35)', 1); }
+  for (let m = 0; m < 6; m++) {
+    const lam = spinPhase + (m * TAU) / 6, line = [];
+    for (let k = -24; k <= 24; k++) line.push(on(lam, (k / 24) * (Math.PI / 2)));
+    runs(line, m === 0 ? '#ff7a1a' : 'rgba(25,35,52,0.6)', m === 0 ? 3.2 : 1.4);
+  }
+  const mark = on(spinPhase, 0);
+  if (V3.dot(mark, cam.pos) > 1) cam.dot(mark, '#ff7a1a', 4.5);
+  if (rps > 0) cam.arrow(V3.mul(a, 1.0), V3.mul(a, 0.55), C.spin, 3, 'spin');
+  cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(V3.norm(cur.v), 1.45), C.ball, 2.6, 'velocity');
+  if (V3.len(cur.F) > 1e-6) cam.arrow({ x: 0, y: 0, z: 0 }, V3.mul(V3.norm(cur.F), 1.45), C.you, 2.6, 'push');
+  ctx.restore();
+  cam.dist = keep.dist; cam.target = keep.target;
+  pen.textS('The ball, close up', x0 + size / 2, y0 + size + 9, { size: 10.5, color: 'rgba(255,255,255,0.75)' });
+  pen.textS(rps > 0 ? 'turning slowed down' : 'not spinning', x0 + size / 2, y0 + size + 22, { size: 10, color: 'rgba(255,255,255,0.5)', weight: 500 });
+}
 ui.on((id) => { sim = null; tr.restart(); });
 
 let sim = null;
@@ -96,6 +147,8 @@ function draw(now) {
   const Fm = V3.len(cur.F);
   if (Fm > 1e-6) cam.arrow(ball, V3.mul(V3.norm(cur.F), k * 1.1), C.you, 3.4, 'Magnus push');
   pens[0].note(`Range ${upto[upto.length - 1].p.x.toFixed(0)} m`);
+  const dtReal = Math.min(0.1, (now - lastNow) / 1000); lastNow = now;
+  closeUp(cur, dtReal);
 
   const q = pens[1].begin();
   const h = q.ch / 2 - 6;
@@ -116,7 +169,8 @@ function draw(now) {
   const verb = { back: 'Backspin makes the ball rise and stay up longer: it goes farther.', top: 'Topspin pushes the ball down: it dips quickly.', left: 'Side-spin pushes the ball to the left.', right: 'Side-spin pushes the ball to the right.' }[ui.v.type];
   app.explain(`${nums([['lands at', `${L.p.x.toFixed(1)} m`, `(${(L.p.x - N.p.x >= 0 ? '+' : '')}${(L.p.x - N.p.x).toFixed(1)} m against no spin)`], ['sideways', `${Math.abs(L.p.y).toFixed(1)} m`, L.p.y > 0.05 ? 'left' : L.p.y < -0.05 ? 'right' : ''], ['highest', `${s.hmax.toFixed(1)} m`, `(${s.hmaxN.toFixed(1)} m with no spin)`], ['spin ratio rω/v', S0.toFixed(2)]])}
     <p>A spinning ball drags the air next to it round with it. On one side, the ball moves with the air that goes past it, and on the other it moves against it. The air is left curving round the ball, and the ball gets an equal push the other way. The push, the <b>Magnus force</b>, points along <b>spin axis × velocity</b> (the cross product): at right angles to both. Use the right-hand rule: curl the fingers of your right hand from the spin axis toward the velocity, and the thumb points along the push. ${verb}</p>
-    <p>It is a small force next to the weight of the ball. But it acts all through the flight, so it bends the path far more than it seems it could: a free kick curves a few meters, a good curveball drops about half a meter more than gravity alone. The golf ball's backspin gives it lift, so a drive stays up for 6 seconds. The dashed path is the same shot with no spin, for comparison. The drag from the air is included for both.</p>`);
+    <p>It is a small force next to the weight of the ball. But it acts all through the flight, so it bends the path far more than it seems it could: a free kick curves a few meters, a good curveball drops about half a meter more than gravity alone. The golf ball's backspin gives it lift, so a drive stays up for 6 seconds. The dashed path is the same shot with no spin, for comparison. The drag from the air is included for both.</p>
+    <p>This is not the Coriolis effect. The Magnus force is a real force from the air, and it needs the ball to spin. The Coriolis effect is a pretend force of a turning frame such as the Earth, and it acts on any moving ball, spinning or not. Both are written with a cross product, which is why they look alike. For a free kick, Coriolis bends the path by about 3 mm. The Magnus force bends it by metres.</p>`);
 }
 tr.restart();
 Spin.run(draw);
