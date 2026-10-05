@@ -17,7 +17,7 @@ const G = 9.81;
 
 const app = Spin.app({
   slug: 'race',
-  sub: 'Energy that goes into spinning is not left over for moving forward. The shape of the mass decides how it is shared.',
+  sub: 'Energy that goes into spinning is not left over for moving forward. The moment of inertia, which depends on how far the mass is from the middle, decides how it is shared.',
   views: [{ caption: '' }, { caption: '' }],
   go: 'Release', speed: { min: 0.1, max: 1.5, value: 0.6, step: 0.05 },
 });
@@ -92,8 +92,9 @@ function drawRace() {
 
   const order = list.slice().sort((a, b) => tFin(a) - tFin(b)).map((o) => o.name.toLowerCase());
   app.explain(`${nums([['fastest', order[0]], ['last', order[order.length - 1]], ['time to the bottom: ring', `${tFin(OBJ[4]).toFixed(2)} s`], ['solid sphere', `${tFin(OBJ[1]).toFixed(2)} s`]])}
-    <p>They all start with the same energy, from the same height. As each rolls down, that energy is split between two uses: <b>moving forward</b> and <b>spinning</b>. The more of the mass is far from the middle, the more energy it takes to spin it at the speed that goes with the rolling. The ring has all its mass at the rim, so half of its energy goes into the spin. A solid sphere has most of its mass near the middle: only 2/7 of the energy goes into the spin, and 5/7 into moving forward. So the sphere speeds up faster. The block does not spin at all, so it wins, if there is no friction at all.</p>
-    <p>The acceleration is g sin θ / (1 + k), where k = I / (m r²) is 0 for the block, 2/5 for the solid sphere, 1/2 for the cylinder, 2/3 for the hollow sphere and 1 for the ring. The result does not depend on the size or the mass of any of them. The order is the same on any slope. (This is the second moment of the mass about the axis, I = Σ m r², again, now deciding a race.)</p>`);
+    <p>The key factor is the <b>moment of inertia</b>: how hard an object is to set spinning. It is I = Σ m r², the sum over all the mass of the mass times the square of its distance from the axis. The farther the mass is from the middle, the larger I is. All the objects start with the same energy, from the same height. As each one rolls down, the energy is split between <b>moving forward</b> and <b>spinning</b>. An object with a large moment of inertia needs more energy to spin at the rate that goes with rolling, so less is left for moving forward, and it speeds up more slowly.</p>
+    <p>The ring has all its mass at the rim, so its moment of inertia is the largest it can be for its mass and size (I = m r²), and half of its energy goes into the spin. A solid sphere has most of its mass near the middle (I = 2/5 m r²), so only 2/7 of the energy goes into the spin, and 5/7 into moving forward. The block does not spin at all, so it wins if there is no friction.</p>
+    <p>The acceleration is g sin θ / (1 + k), where k = I / (m r²) is the moment of inertia in units of m r²: 0 for the block, 2/5 for the solid sphere, 1/2 for the cylinder, 2/3 for the hollow sphere and 1 for the ring. The result does not depend on the size or the mass of any of them, and the order is the same on any slope.</p>`);
 }
 
 // ---------- The spool ----------
