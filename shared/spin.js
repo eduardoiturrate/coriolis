@@ -320,6 +320,35 @@
 
   const BRAND = `<svg viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="16" cy="16" r="3" fill="#ffa24a" stroke="none"/><path d="M16 4a12 12 0 1 1-11.4 8.3" stroke="#4fc3f7" stroke-width="2.6"/><path d="M3 5l2 7 7-2" stroke="#4fc3f7" stroke-width="2.6"/></svg>`;
 
+  /**
+   * A search box with a list of results that drops down under it: pages, and the tabs inside pages. Press / to start typing,
+   * the arrow keys to choose, Enter to go. `prefix` is the way from the page to the folder of the explainers ('../' or '').
+   */
+  function wireSearch(box, res, prefix, onOpen) {
+    let shown = [], at = 0;
+    const href = (r) => `${prefix}${r.slug}/${r.hash ? '#' + r.hash : ''}`;
+    const paint = () => { [...res.children].forEach((a, k) => a.classList.toggle('on', k === at)); };
+    const render = () => {
+      shown = search(box.value);
+      if (!box.value.trim()) { res.hidden = true; return; }
+      at = 0;
+      res.innerHTML = shown.length ? shown.map((r) => `<a href="${href(r)}">${ICONS[r.slug]}<span class="t">${r.title}</span><span class="s">${r.hash ? 'in ' + r.sub : r.sub}</span></a>`).join('') : '<div class="none">No explainer matches.</div>';
+      res.hidden = false; paint();
+      if (onOpen) onOpen();
+    };
+    box.addEventListener('input', render);
+    box.addEventListener('focus', render);
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (shown.length) { at = (at + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length; paint(); } }
+      else if (e.key === 'Enter' && shown[at]) { e.preventDefault(); location.href = href(shown[at]); }
+      else if (e.key === 'Escape') { box.value = ''; res.hidden = true; box.blur(); }
+    });
+    document.addEventListener('click', (e) => { if (e.target !== box && !res.contains(e.target)) res.hidden = true; });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); box.focus(); box.select(); }
+    });
+  }
+
   function topbar(slug) {
     let bar = $('topbar');
     if (!bar) { bar = el('header'); bar.id = 'topbar'; document.body.prepend(bar); }
@@ -333,7 +362,7 @@
       <a class="nav" href="../${prev.slug}/" title="Previous: ${prev.title}" aria-label="Previous: ${prev.title}">‹</a>
       <a class="nav" href="../${next.slug}/" title="Next: ${next.title}" aria-label="Next: ${next.title}">›</a>
       <button id="menuBtn" aria-expanded="false" aria-controls="menu">All explainers ▾</button>
-      <div id="results" role="listbox" hidden></div>
+      <div id="results" class="sresults" role="listbox" hidden></div>
       <nav id="menu" hidden>${GROUPS.map((g, gi) => `<div><h4>${g}</h4>${TOPICS.filter((t) => t.group === gi).map((t) => `<a href="../${t.slug}/"${t.slug === slug ? ' class="now"' : ''}>${ICONS[t.slug]}<span>${t.title}</span></a>`).join('')}</div>`).join('')}</nav>`;
     const menu = $('menu'), btn = $('menuBtn');
     const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
@@ -341,30 +370,7 @@
     document.addEventListener('click', (e) => { if (!menu.contains(e.target)) close(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
 
-    // Search: pages, and the tabs inside pages. Press / to start typing, Enter to go, arrow keys to choose.
-    const box = $('searchBox'), res = $('results');
-    let shown = [], at = 0;
-    const href = (r) => `../${r.slug}/${r.hash ? '#' + r.hash : ''}`;
-    const paint = () => { [...res.children].forEach((a, k) => a.classList.toggle('on', k === at)); };
-    const render = () => {
-      shown = search(box.value);
-      if (!box.value.trim()) { res.hidden = true; return; }
-      at = 0;
-      res.innerHTML = shown.length ? shown.map((r) => `<a href="${href(r)}">${ICONS[r.slug]}<span class="t">${r.title}</span><span class="s">${r.hash ? 'in ' + r.sub : r.sub}</span></a>`).join('') : '<div class="none">No explainer matches.</div>';
-      res.hidden = false; paint();
-      menu.hidden = true; btn.setAttribute('aria-expanded', 'false');
-    };
-    box.addEventListener('input', render);
-    box.addEventListener('focus', render);
-    box.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (shown.length) { at = (at + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length; paint(); } }
-      else if (e.key === 'Enter' && shown[at]) { e.preventDefault(); location.href = href(shown[at]); }
-      else if (e.key === 'Escape') { box.value = ''; res.hidden = true; box.blur(); }
-    });
-    document.addEventListener('click', (e) => { if (e.target !== box && !res.contains(e.target)) res.hidden = true; });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); box.focus(); box.select(); }
-    });
+    wireSearch($('searchBox'), $('results'), '../', () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); });
   }
 
   /** The label beyond the tip of an arrow. It moves above the tip when it would run off the canvas. */
@@ -964,5 +970,5 @@
     };
   }
 
-  window.Spin = { MODES, KEYS, search, topicMatches, TAU, DEG, $, clamp, lerp, el, css, C, V, V3, fmt, nums, rng, rk4, niceTicks, TOPICS, GROUPS, ICONS, BRAND, topbar, Pen, Cam3, UI, Transport, app, run, tone };
+  window.Spin = { MODES, KEYS, search, topicMatches, wireSearch, TAU, DEG, $, clamp, lerp, el, css, C, V, V3, fmt, nums, rng, rk4, niceTicks, TOPICS, GROUPS, ICONS, BRAND, topbar, Pen, Cam3, UI, Transport, app, run, tone };
 })();

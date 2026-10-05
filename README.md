@@ -140,7 +140,7 @@ for to `KEYS`.
 Search: every page has a search box in the top bar (press `/` to start typing). It finds pages by title,
 description and `KEYS`, and finds the tabs inside pages by name. A result for a tab opens the page on
 that tab, because a page address such as `momentum/#cat` selects the tab named `cat`. The home page
-has a search box that filters the cards.
+has the same search box, with the same drop-down list of results.
 
 ## Credits
 
