@@ -33,8 +33,9 @@ ui.slider('tuck', { label: 'Tucked legs against stretched legs (moment of inerti
 ui.actions([{ text: 'Drop it upside down again', fn: () => resetCat() }], { show: is('cat') });
 // Box
 ui.seg('axis', [['x', 'Long axis'], ['y', 'Middle axis'], ['z', 'Short axis']], { label: 'Spin it about', show: is('racket') });
-ui.slider('wob', { label: 'Size of the wobble at the start', min: 0.5, max: 10, step: 0.5, value: 3, fmt: (v) => `${v}%`, show: is('racket') });
+ui.slider('wob', { label: 'Size of the wobble at the start', min: 0, max: 10, step: 0.5, value: 3, fmt: (v) => `${v}%`, show: is('racket'), hint: 'Every real throw has a little wobble, about any axis. At 0% the spin is perfect.' });
 ui.slider('w0', { label: 'Spin', min: 0.3, max: 1.2, step: 0.05, value: 0.7, fmt: (v) => `${v.toFixed(2)} turns a second`, show: is('racket') });
+ui.check('paths', 'Show every path the angular momentum can take (right)', true, { show: is('racket') });
 
 function setupMode() {
   const m = ui.v.mode;
@@ -176,8 +177,8 @@ function qrot(q, v) {
   const t = V3.mul(V3.cross(u, v), 2);
   return V3.add(V3.add(v, V3.mul(t, q[0])), V3.cross(u, t));
 }
-const camL = new Spin.Cam3(pens[0], { az: 0.8, el: 0.4, dist: 7, fov: 36, min: 3, max: 14 });
-const camR = new Spin.Cam3(pens[1], { az: 0.8, el: 0.4, dist: 7, fov: 36, min: 3, max: 14 });
+const camL = new Spin.Cam3(pens[0], { az: 0.8, el: 0.4, dist: 5.4, fov: 42, min: 3, max: 14 });
+const camR = new Spin.Cam3(pens[1], { az: 0.8, el: 0.4, dist: 5.4, fov: 42, min: 3, max: 14 });
 let R = null;
 function initRacket() {
   const ax = ui.v.axis, w0 = ui.v.w0 * TAU, wob = ui.v.wob / 100 * w0;
@@ -212,14 +213,59 @@ const FACES = [
   { ax: 'x', s: 1, col: '255,120,120' }, { ax: 'x', s: -1, col: '255,120,120' }, { ax: 'y', s: 1, col: '130,230,150' },
   { ax: 'y', s: -1, col: '130,230,150' }, { ax: 'z', s: 1, col: '110,170,255' }, { ax: 'z', s: -1, col: '110,170,255' },
 ];
-function boxFaces(tf) {
-  const hx = DIM.x / 4, hy = DIM.y / 4, hz = DIM.z / 4;
-  return FACES.map((f) => {
+const LIGHT = V3.norm({ x: -0.4, y: -0.6, z: 0.7 });
+/** The six faces as an opaque, shaded solid. Faces that point away from the camera are left out. */
+function boxFaces(tf, cam) {
+  const half = { x: DIM.x / 4, y: DIM.y / 4, z: DIM.z / 4 }, o = tf({ x: 0, y: 0, z: 0 });
+  const out = [];
+  for (const f of FACES) {
     const u = f.ax === 'x' ? ['y', 'z'] : f.ax === 'y' ? ['z', 'x'] : ['x', 'y'];
-    const half = { x: hx, y: hy, z: hz };
-    const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, b]) => { const p = { x: 0, y: 0, z: 0 }; p[f.ax] = f.s * half[f.ax]; p[u[0]] = a * half[u[0]]; p[u[1]] = b * half[u[1]]; return tf(p); });
-    return { pts, fill: `rgba(${f.col},0.30)`, stroke: `rgba(${f.col},0.9)`, width: 1.6 };
-  });
+    const n0 = { x: 0, y: 0, z: 0 }; n0[f.ax] = f.s;
+    const nrm = V3.add(tf(n0), V3.mul(o, -1));
+    const c0 = { x: 0, y: 0, z: 0 }; c0[f.ax] = f.s * half[f.ax];
+    const ctr = tf(c0);
+    if (V3.dot(nrm, V3.add(cam.pos, V3.mul(ctr, -1))) <= 0) continue;
+    const k = 0.4 + 0.6 * Math.max(0, V3.dot(nrm, LIGHT));
+    const [r, g, b] = f.col.split(',').map(Number);
+    const pts = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([a, bb]) => { const p = { x: 0, y: 0, z: 0 }; p[f.ax] = f.s * half[f.ax]; p[u[0]] = a * half[u[0]]; p[u[1]] = bb * half[u[1]]; return tf(p); });
+    out.push({ pts, fill: `rgb(${Math.round(r * k * 0.8)},${Math.round(g * k * 0.8)},${Math.round(b * k * 0.8)})`, stroke: 'rgba(255,255,255,0.6)', width: 1.4 });
+  }
+  return out;
+}
+
+// Every path the tip of L can follow in the box's own frame: dL/dt = L x w, with w = (Lx/Ix, Ly/Iy, Lz/Iz).
+const PR = 1.5;
+const POL = (() => {
+  const f = (y) => { const w = [y[0] / IN.x, y[1] / IN.y, y[2] / IN.z]; return [y[1] * w[2] - y[2] * w[1], y[2] * w[0] - y[0] * w[2], y[0] * w[1] - y[1] * w[0]]; };
+  const lines = [], N = 22;
+  for (let i = 0; i < N; i++) {
+    const z = 1 - (2 * (i + 0.5)) / N, r = Math.sqrt(1 - z * z), a = i * 2.399963;
+    const start = [r * Math.cos(a), r * Math.sin(a), z];
+    for (const dir of [1, -1]) {
+      let y = start;
+      const run = [{ x: y[0] * PR, y: y[1] * PR, z: y[2] * PR }];
+      for (let k = 0; k < 330; k++) { y = Spin.rk4(f, y, 0, 0.03 * dir); const l = Math.hypot(...y); y = y.map((c) => c / l); run.push({ x: y[0] * PR, y: y[1] * PR, z: y[2] * PR }); }
+      lines.push(run);
+    }
+  }
+  return lines;
+})();
+// The two paths that cross at the middle axis: great circles through it.
+const SEP = (() => {
+  const m = Math.sqrt((1 / IN.x - 1 / IN.y) / (1 / IN.y - 1 / IN.z)), out = [];
+  for (const sg of [1, -1]) {
+    const u = V3.norm({ x: 1, y: 0, z: sg * m }), pts = [];
+    for (let k = 0; k <= 120; k++) { const t = (k / 120) * TAU; pts.push({ x: PR * (Math.sin(t) * u.x), y: PR * Math.cos(t), z: PR * (Math.sin(t) * u.z) }); }
+    out.push(pts);
+  }
+  return out;
+})();
+/** Draw a path on the sphere, in two colours: the part facing the camera and the part behind. */
+function sphereRuns(cam, pts, front, back, width, side) {
+  let run = [], vis = null;
+  const flush = () => { if (run.length > 1 && ((vis && side === 'front') || (!vis && side === 'back'))) cam.line(run, vis ? front : back, vis ? width : 1); };
+  for (const p of pts) { const v = V3.dot(p, cam.pos) > PR * PR; if (vis !== null && v !== vis) { flush(); run = [run[run.length - 1]]; } vis = v; run.push(p); }
+  flush();
 }
 function drawRacket(dt) {
   if (!R) initRacket();
@@ -230,7 +276,7 @@ function drawRacket(dt) {
 
   // Left: the box tumbles; its angular momentum arrow stays still.
   pens[0].begin(); camL.begin();
-  camL.faces(boxFaces((p) => qrot(R.q, p)));
+  camL.faces(boxFaces((p) => qrot(R.q, p), camL));
   camL.arrow({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1.7 }, C.spin, 3.5, 'L');
   camL.arrow({ x: 0, y: 0, z: 0 }, V3.mul(qrot(R.q, V3.norm(R.w)), 1.4), C.ink, 3, 'turning axis');
   camL.line([{ x: -1.8, y: 0, z: -1 }, { x: 1.8, y: 0, z: -1 }], 'rgba(255,255,255,0.0)', 1);
@@ -238,24 +284,35 @@ function drawRacket(dt) {
 
   // Right: the box does not move. L moves around it.
   pens[1].begin(); camR.begin();
-  camR.faces(boxFaces((p) => p));
+  if (ui.v.paths) {
+    for (const pts of POL) sphereRuns(camR, pts, 'rgba(255,255,255,0.0)', 'rgba(255,255,255,0.07)', 1, 'back');
+    for (const pts of SEP) sphereRuns(camR, pts, 'rgba(255,255,255,0.0)', 'rgba(255,213,79,0.22)', 1, 'back');
+  }
+  camR.faces(boxFaces((p) => p, camR));
+  if (ui.v.paths) {
+    for (const pts of POL) sphereRuns(camR, pts, 'rgba(255,255,255,0.22)', 'rgba(0,0,0,0)', 1.2, 'front');
+    for (const pts of SEP) sphereRuns(camR, pts, 'rgba(255,213,79,0.85)', 'rgba(0,0,0,0)', 2.2, 'front');
+  }
   for (const [ax, col, lab] of [['x', '#ff7878', 'long'], ['y', '#82e696', 'middle'], ['z', '#6eaaff', 'short']]) {
-    const e = { x: 0, y: 0, z: 0 }; e[ax] = 1.25;
+    const e = { x: 0, y: 0, z: 0 }; e[ax] = 1.5;
     camR.line([V3.mul(e, -1), e], col, 1.5, [4, 4]);
     camR.text(lab, e, { size: 10.5, color: col, dy: -6 });
   }
   camR.line(R.trail, C.spin, 2.5);
   camR.arrow({ x: 0, y: 0, z: 0 }, V3.mul(Ln, 1.5), C.spin, 3.5, 'L');
   camR.arrow({ x: 0, y: 0, z: 0 }, V3.mul(V3.norm(R.w), 1.3), C.ink, 3);
-  pens[1].note('Seen from the box: L wanders over the box');
+  pens[1].note(ui.v.paths ? 'Seen from the box: L can only follow these paths' : 'Seen from the box: L wanders over the box');
 
   const ax = ui.v.axis, o = ['x', 'y', 'z'].filter((a) => a !== ax);
   const k = (IN[ax] - IN[o[0]]) * (IN[ax] - IN[o[1]]) / (IN[o[0]] * IN[o[1]]);
   const w0 = ui.v.w0 * TAU, rate = w0 * Math.sqrt(Math.abs(k));
   const word = ax === 'x' ? 'smallest' : ax === 'z' ? 'largest' : 'middle';
   app.explain(`${nums([['spin axis', `${ax === 'x' ? 'long' : ax === 'y' ? 'middle' : 'short'}`], ['its moment of inertia is the', word], [k > 0 ? 'small wobble turns at' : 'wobble grows by', k > 0 ? `${(rate / TAU).toFixed(2)}` : `${Math.exp(rate).toFixed(1)}×`, k > 0 ? 'turns a second' : 'each second']])}
-    <p>A box has three axes with three different moments of inertia (smallest along its long edge, largest across its short edge). Throw it spinning about the <b>long</b> or the <b>short</b> axis, and it keeps spinning about it with a small steady wobble. Throw it spinning about the <b>middle</b> axis, and any small wobble grows, and the box <b>flips over</b> again and again. This is the tennis racket theorem.</p>
-    <p>The angular momentum L, the yellow arrow, is fixed in space (left). In the box's own frame (right), L moves, and its tip draws a curve that must keep both L and the energy fixed. Around the long or the short axis this curve is a small loop. Around the middle axis it runs a long way around the box. The same flip is seen with a T-shaped handle turning in the International Space Station.</p>`);
+    <p>A box has three axes: long, middle and short. Its moment of inertia is smallest along the long axis, largest along the short axis, and in between along the middle axis. Spin it about the long or the short axis, and it keeps spinning about it. Spin it about the middle axis, and it flips over again and again. This is the tennis racket theorem. A T-shaped handle in the International Space Station does the same.</p>
+    <p><b>Wobble.</b> A spin about exactly one of the three axes has no wobble. A real throw is never exact, so every start here has a small error, set by the slider. About the long and the short axis, the error stays small. About the middle axis, the error grows until the box flips. At 0% all three spin cleanly, but the middle one breaks with any tiny error. If the spin is not about one of the three axes, the box wobbles even with no error.</p>
+    <p><b>Why the middle axis is different.</b> A small wobble has two parts, one about each of the other two axes. As the box turns, each part pushes on the other. About the long or the short axis, the pushes work against each other, so the wobble swings back and forth. About the middle axis, the pushes work together, so the wobble grows by a fixed factor each second.</p>
+    <p><b>The same thing on the right.</b> Two quantities stay fixed: the size of L and the energy. In the box's own frame, the tip of L can only follow the curves drawn on the sphere. Around the long and the short axis, the curves are small closed loops, so L stays near where it started. At the middle axis, two curves cross (the yellow circles). A tiny error puts L on a curve that leads to the far side of the box, and the box flips.</p>
+    <p><b>In a real object</b>, the energy slowly drops, and the object ends up spinning about its short axis. The satellite Explorer 1 (1958) was made to spin about its long axis. It ended up spinning end over end.</p>`);
 }
 
 let lastT = performance.now();
