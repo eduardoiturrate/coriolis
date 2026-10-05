@@ -24,6 +24,9 @@
   .card svg { width: 54px; height: 54px; }
   .card h3 { margin: 0; font-size: 17px; }
   .card p { margin: 0; color: #aab6c8; font-size: 13.5px; line-height: 1.45; }
+  #q { width: min(100%, 420px); height: 42px; margin: 18px 0 0; padding: 0 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); font: inherit; outline: none; }
+  #q:focus { border-color: rgba(79, 195, 247, 0.6); }
+  #none { margin: 30px 0; color: var(--muted); }
   footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12.5px; }
   footer a { text-decoration: underline; }
   @media (max-width: 560px) { h1 { font-size: 40px; } header { padding-top: 34px; } header svg { width: 56px; height: 56px; } }
@@ -36,6 +39,7 @@
     <div>
       <h1>Spin</h1>
       <p class="tag">Interactive explainers of motion and rotation. Most of them show the same motion from two points of view, so you can see why it looks the way it does.</p>
+      <input id="q" type="search" placeholder="Search the explainers, for example: cat" autocomplete="off" spellcheck="false" aria-label="Search the explainers" />
     </div>
   </header>
   <div id="groups"></div>
@@ -46,7 +50,17 @@
   document.getElementById('logo').innerHTML = Spin.BRAND;
   document.getElementById('groups').innerHTML = Spin.GROUPS.map((g, gi) =>
     `<h2>${g}</h2><div class="grid">${Spin.TOPICS.filter((t) => t.group === gi).map((t) =>
-      `<a class="card" href="${t.slug}/">${Spin.ICONS[t.slug]}<h3>${t.title}</h3><p>${t.blurb}</p></a>`).join('')}</div>`).join('');
+      `<a class="card" data-slug="${t.slug}" href="${t.slug}/">${Spin.ICONS[t.slug]}<h3>${t.title}</h3><p>${t.blurb}</p></a>`).join('')}</div>`).join('');
+  const q = document.getElementById('q'), groups = document.getElementById('groups');
+  groups.insertAdjacentHTML('beforeend', '<p id="none" hidden>No explainer matches.</p>');
+  const filter = () => {
+    let any = false;
+    document.querySelectorAll('.card').forEach((c) => { const ok = !q.value.trim() || Spin.topicMatches(c.dataset.slug, q.value); c.hidden = !ok; any = any || ok; });
+    groups.querySelectorAll('.grid').forEach((g) => { const none = ![...g.children].some((c) => !c.hidden); g.hidden = none; g.previousElementSibling.hidden = none; });
+    document.getElementById('none').hidden = any;
+  };
+  q.addEventListener('input', filter);
+  document.addEventListener('keydown', (e) => { if (e.key === '/' && document.activeElement !== q) { e.preventDefault(); q.focus(); } });
 </script>
 </body>
 </html>

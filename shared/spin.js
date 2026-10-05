@@ -165,6 +165,98 @@
     { slug: 'levers', group: 7, title: 'Levers and torque', blurb: 'Turning force is force times distance from the pivot. Balance a beam, meet the three classes of lever, and see what you trade for the extra force.' },
   ];
 
+  /** The tabs inside each page: [value, label]. The search box uses them, and #value in a page address opens that tab. */
+  const MODES = {
+    bloch: [['precess', 'A magnetic field'], ['rabi', 'A pulse at resonance'], ['measure', 'Measuring']],
+    centrifugal: [['string', 'Ball on a string'], ['bucket', 'Spinning bucket'], ['rotor', 'Wall ride']],
+    charged: [['b', 'Magnetic field'], ['drift', 'Electric and magnetic'], ['belt', 'Earth’s belts']],
+    circle: [['shadows', 'Shadows of a point'], ['radians', 'Angles and radians'], ['sum', 'Adding waves']],
+    complex: [['times', 'Multiplying'], ['euler', 'Euler’s formula'], ['identity', 'Euler’s identity'], ['powers', 'Powers and roots']],
+    coupled: [['pair', 'Two pendulums'], ['chain', 'Chain of masses']],
+    day: [['day', 'Days by the Sun and by the stars'], ['gyro', 'Earth’s axis turns']],
+    fourier: [['wave', 'Build a wave'], ['draw', 'Draw with circles']],
+    gears: [['train', 'A gear train'], ['planet', 'Planetary gears'], ['diff', 'Car differential']],
+    gyroscope: [['top', 'Heavy top'], ['push', 'Push the axle']],
+    hub: [['weight', 'Weight and view'], ['drift', 'Let go'], ['ladder', 'Climb down']],
+    induction: [['magnet', 'Magnet and coil'], ['gen', 'Generator'], ['tube', 'Falling magnet']],
+    levers: [['balance', 'Balance a beam'], ['classes', 'Three classes'], ['trade', 'Force for distance'], ['pivot', 'A push at an angle']],
+    maneuvers: [['burn', 'Fire an engine'], ['xfer', 'Transfer orbit'], ['chase', 'Chase a station']],
+    momentum: [['skater', 'Skater'], ['cat', 'Falling cat'], ['racket', 'Tumbling box']],
+    observers: [['rain', 'Rain'], ['doppler', 'Doppler effect'], ['aber', 'Stars ahead']],
+    orbits: [['kepler', 'Kepler’s laws'], ['launch', 'Newton’s cannon'], ['turn', 'A turning orbit']],
+    race: [['race', 'Race down a slope'], ['spool', 'The spool']],
+    relativity: [['clock', 'Light clock'], ['train', 'Train and lightning'], ['st', 'Spacetime diagram'], ['boost', 'Boosts are rotations']],
+    rot3d: [['order', 'Order matters'], ['gimbal', 'Gimbal lock'], ['one', 'One axis, one angle'], ['double', 'A turn of 720°']],
+    rotvec: [['turn', 'A turning arrow'], ['cross', 'The cross product'], ['frame', 'Walking on a turntable']],
+    sphere: [['tri', 'A triangle'], ['lat', 'Round a circle of latitude']],
+    spirograph: [['in', 'Wheel inside the ring'], ['out', 'Wheel outside the ring']],
+    stability: [['bike', 'Bicycle'], ['coin', 'Spinning coin']],
+    tides: [['bulge', 'Two tides a day'], ['lock', 'The same face']],
+    wagon: [['wheel', 'A wheel on film'], ['wave', 'Any signal, sampled']],
+    waves: [['cross', 'Two waves cross'], ['string', 'String and sound'], ['reflect', 'Pulse at an end']],
+  };
+
+  /** Extra words that people may type to find a page. */
+  const KEYS = {
+    coriolis: 'foucault pendulum hurricane cyclone storm trade winds eotvos cannon merry-go-round',
+    centrifugal: 'washing machine centripetal bucket string',
+    momentum: 'tennis racket theorem intermediate axis dzhanibekov ice skater figure skating',
+    gyroscope: 'spinning top precession nutation',
+    stability: 'bike bicycle coin',
+    rolling: 'cycloid wheel',
+    magnus: 'curve ball baseball football soccer free kick tennis golf spin',
+    race: 'rolling inertia yo-yo',
+    orbits: 'kepler ellipse planet newton cannon',
+    maneuvers: 'rocket hohmann transfer rendezvous docking',
+    slingshot: 'gravity assist flyby voyager',
+    inclination: 'launch azimuth latitude',
+    tides: 'moon ocean tidal locking',
+    day: 'sidereal solar precession equinox pole star year',
+    relativity: 'einstein time dilation lorentz minkowski twin simultaneity rapidity',
+    observers: 'doppler siren mach aberration',
+    resonance: 'swing oscillator damping',
+    coupled: 'normal modes beats pendulums',
+    waves: 'standing wave harmonics string guitar',
+    fourier: 'epicycles series square wave',
+    charged: 'cyclotron lorentz force van allen belts aurora',
+    induction: 'faraday lenz generator magnet coil eddy currents',
+    bloch: 'qubit spin half mri nmr stern gerlach quantum rabi',
+    circle: 'sine cosine radians trigonometry',
+    complex: 'imaginary numbers euler identity de moivre roots of unity',
+    rotvec: 'cross product angular velocity right hand rule',
+    rot3d: 'quaternion euler angles gimbal lock rotation matrix',
+    spirograph: 'trochoid hypotrochoid epicycloid',
+    sphere: 'foucault parallel transport curvature holonomy berry phase geodesic',
+    gears: 'gearbox transmission planetary differential car willis',
+    wagon: 'aliasing nyquist helicopter blades strobe frame rate sampling',
+    levers: 'torque fulcrum see-saw crowbar moment seesaw',
+  };
+
+  const norm = (x) => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  /** Does the topic match every word of the query? (Used by the home page to filter its cards.) */
+  function topicMatches(slug, q) {
+    const tk = norm(q).split(/[\s,]+/).filter(Boolean), t = TOPICS.find((x) => x.slug === slug);
+    if (!t) return false;
+    const text = norm(`${t.title} ${t.blurb} ${KEYS[slug] || ''} ${(MODES[slug] || []).map((m) => m[1]).join(' ')}`);
+    return tk.every((w) => text.includes(w));
+  }
+  /** Results for the search box: pages, and tabs inside pages. Each is { slug, hash, title, sub, score }, best first. */
+  function search(q, limit = 8) {
+    const tk = norm(q).split(/[\s,]+/).filter(Boolean);
+    if (!tk.length) return [];
+    const out = [];
+    TOPICS.forEach((t, ti) => {
+      const title = norm(t.title), rest = norm(`${t.blurb} ${KEYS[t.slug] || ''}`);
+      if (tk.every((w) => title.includes(w))) out.push({ slug: t.slug, title: t.title, sub: t.blurb, score: 3 + (title.startsWith(tk[0]) ? 0.5 : 0) - ti / 1000 });
+      else if (tk.every((w) => (title + ' ' + rest).includes(w))) out.push({ slug: t.slug, title: t.title, sub: t.blurb, score: 1 - ti / 1000 });
+      for (const [v, label] of MODES[t.slug] || []) {
+        const ml = norm(label);
+        if (tk.every((w) => ml.includes(w))) out.push({ slug: t.slug, hash: v, title: label, sub: t.title, score: 4 + (ml.startsWith(tk[0]) ? 0.5 : 0) - ti / 1000 });
+      }
+    });
+    return out.sort((a, b) => b.score - a.score).slice(0, limit);
+  }
+
   // Small pictures for the home page and the menu. Each fits a 64 by 64 box.
   const ic = (body) => `<svg viewBox="0 0 64 64" fill="none" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
   const W = '#c9d3df', A = '#4fc3f7', B = '#ffa24a', G = '#9be7a6', P = '#f06292', Y = '#ffd54f';
@@ -219,15 +311,42 @@
     const here = TOPICS[i];
     bar.innerHTML = `<a class="brand" href="../">${BRAND}<span>Spin</span></a>
       <span class="sep">/</span><span class="here">${here ? here.title : ''}</span><span class="grow"></span>
+      <input id="searchBox" type="search" placeholder="Search" autocomplete="off" spellcheck="false" aria-label="Search the explainers" aria-controls="results" />
       <a class="nav" href="../${prev.slug}/" title="Previous: ${prev.title}" aria-label="Previous: ${prev.title}">‹</a>
       <a class="nav" href="../${next.slug}/" title="Next: ${next.title}" aria-label="Next: ${next.title}">›</a>
       <button id="menuBtn" aria-expanded="false" aria-controls="menu">All explainers ▾</button>
+      <div id="results" role="listbox" hidden></div>
       <nav id="menu" hidden>${GROUPS.map((g, gi) => `<div><h4>${g}</h4>${TOPICS.filter((t) => t.group === gi).map((t) => `<a href="../${t.slug}/"${t.slug === slug ? ' class="now"' : ''}>${ICONS[t.slug]}<span>${t.title}</span></a>`).join('')}</div>`).join('')}</nav>`;
     const menu = $('menu'), btn = $('menuBtn');
     const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
     btn.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); });
     document.addEventListener('click', (e) => { if (!menu.contains(e.target)) close(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+
+    // Search: pages, and the tabs inside pages. Press / to start typing, Enter to go, arrow keys to choose.
+    const box = $('searchBox'), res = $('results');
+    let shown = [], at = 0;
+    const href = (r) => `../${r.slug}/${r.hash ? '#' + r.hash : ''}`;
+    const paint = () => { [...res.children].forEach((a, k) => a.classList.toggle('on', k === at)); };
+    const render = () => {
+      shown = search(box.value);
+      if (!box.value.trim()) { res.hidden = true; return; }
+      at = 0;
+      res.innerHTML = shown.length ? shown.map((r) => `<a href="${href(r)}">${ICONS[r.slug]}<span class="t">${r.title}</span><span class="s">${r.hash ? 'in ' + r.sub : r.sub}</span></a>`).join('') : '<div class="none">No explainer matches.</div>';
+      res.hidden = false; paint();
+      menu.hidden = true; btn.setAttribute('aria-expanded', 'false');
+    };
+    box.addEventListener('input', render);
+    box.addEventListener('focus', render);
+    box.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (shown.length) { at = (at + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length; paint(); } }
+      else if (e.key === 'Enter' && shown[at]) { e.preventDefault(); location.href = href(shown[at]); }
+      else if (e.key === 'Escape') { box.value = ''; res.hidden = true; box.blur(); }
+    });
+    document.addEventListener('click', (e) => { if (e.target !== box && !res.contains(e.target)) res.hidden = true; });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '/' && !/INPUT|TEXTAREA|SELECT/.test(e.target.tagName || '') && !e.ctrlKey && !e.metaKey) { e.preventDefault(); box.focus(); box.select(); }
+    });
   }
 
   /** The label beyond the tip of an arrow. It moves above the tip when it would run off the canvas. */
@@ -787,7 +906,13 @@
       ui, tr, pens, views: viewEls, layout,
       head: $('modeHost'),
       /** Tabs for the modes of the page, at the top of the control column. */
-      modes(id, options, value) { ui.seg(id, options, { host: $('modeHost'), big: true, row: false, value }); },
+      modes(id, options, value) {
+        const vals = options.map((x) => (Array.isArray(x) ? x[0] : typeof x === 'object' ? x.v : x));
+        const fromAddress = () => decodeURIComponent(location.hash.slice(1));
+        if (vals.includes(fromAddress())) value = fromAddress();
+        ui.seg(id, options, { host: $('modeHost'), big: true, row: false, value });
+        window.addEventListener('hashchange', () => { if (vals.includes(fromAddress())) ui.set(id, fromAddress()); });
+      },
       caption(i, text) { viewEls[i].querySelector('h3').textContent = text; },
       /** Show the first n views and hide the rest. */
       show(n, cols) { viewEls.forEach((v, i) => { v.hidden = i >= n; }); if (cols) layout(cols); },
@@ -821,5 +946,5 @@
     };
   }
 
-  window.Spin = { TAU, DEG, $, clamp, lerp, el, css, C, V, V3, fmt, nums, rng, rk4, niceTicks, TOPICS, GROUPS, ICONS, BRAND, topbar, Pen, Cam3, UI, Transport, app, run, tone };
+  window.Spin = { MODES, KEYS, search, topicMatches, TAU, DEG, $, clamp, lerp, el, css, C, V, V3, fmt, nums, rng, rk4, niceTicks, TOPICS, GROUPS, ICONS, BRAND, topbar, Pen, Cam3, UI, Transport, app, run, tone };
 })();

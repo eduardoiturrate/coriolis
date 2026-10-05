@@ -117,7 +117,14 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
 - One folder per explainer, with an `index.html` that builds its page with `Spin.app({...})`.
 
 To add an explainer: copy a small one (for example `resonance/index.html`), add an entry to
-`TOPICS` and `ICONS` in `shared/spin.js`, and it appears on the home page and in the menu.
+`TOPICS` and `ICONS` in `shared/spin.js`, and it appears on the home page and in the menu. If the page
+has tabs (`app.modes(...)`), copy them into `MODES` in the same file, and add words people may search
+for to `KEYS`.
+
+Search: every page has a search box in the top bar (press `/` to start typing). It finds pages by title,
+description and `KEYS`, and finds the tabs inside pages by name. A result for a tab opens the page on
+that tab, because a page address such as `momentum/#cat` selects the tab named `cat`. The home page
+has a search box that filters the cards.
 
 ## Credits
 

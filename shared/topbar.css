@@ -19,4 +19,18 @@
 #topbar #menu a:hover { background: rgba(255, 255, 255, 0.08); }
 #topbar #menu a.now { background: rgba(79, 195, 247, 0.16); color: #cfeeff; }
 #topbar #menu a svg { width: 22px; height: 22px; flex: none; }
+#topbar #searchBox { height: 28px; width: 150px; padding: 0 10px; border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 8px; background: rgba(255, 255, 255, 0.05);
+  color: #e3e9f2; font: inherit; outline: none; transition: width 0.15s, background 0.15s, border-color 0.15s; }
+#topbar #searchBox::placeholder { color: #7d8aa0; }
+#topbar #searchBox:focus { width: 240px; background: rgba(255, 255, 255, 0.09); border-color: rgba(79, 195, 247, 0.6); }
+#topbar #results { position: absolute; top: 46px; right: 10px; width: min(460px, calc(100vw - 20px)); max-height: calc(100vh - 60px); overflow-y: auto; padding: 6px;
+  background: #0d1420; border: 1px solid rgba(255, 255, 255, 0.16); border-radius: 14px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.6); }
+#topbar #results[hidden] { display: none; }
+#topbar #results a { display: grid; grid-template-columns: 26px 1fr; column-gap: 10px; align-items: center; padding: 6px 8px; border-radius: 9px; color: #cfd8e6; }
+#topbar #results a svg { grid-row: span 2; width: 24px; height: 24px; }
+#topbar #results a .t { font-weight: 600; color: #e9eff8; }
+#topbar #results a .s { color: #8593a8; font-size: 11.5px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#topbar #results a:hover, #topbar #results a.on { background: rgba(79, 195, 247, 0.16); }
+#topbar #results .none { padding: 10px; color: #8593a8; }
 @media (max-width: 640px) { #topbar .here, #topbar .sep { display: none; } #topbar { position: sticky; top: 0; } }
+@media (max-width: 520px) { #topbar .brand span, #topbar .nav { display: none; } #topbar #searchBox { width: 120px; flex: 1; max-width: 220px; } #topbar #searchBox:focus { width: auto; } #topbar .grow { display: none; } }
