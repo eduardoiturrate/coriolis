@@ -29,16 +29,57 @@ ui.slider('v', { label: 'Speed off the foot, bat or club', min: 10, max: 80, ste
 ui.slider('el', { label: 'Angle upward', min: 0, max: 45, step: 1, value: 14, fmt: (v) => `${v}°` });
 ui.slider('rps', { label: 'Spin', min: 0, max: 60, step: 1, value: 9, fmt: (v) => `${v} turns a second` });
 ui.seg('type', [['back', 'Backspin'], ['top', 'Topspin'], ['left', 'Side: curves left'], ['right', 'Side: curves right']], { label: 'Which way it spins', pick: true, cols: 2, value: 'left' });
+ui.slider('wind', { label: 'Wind', min: 0, max: 20, step: 1, value: 0, fmt: (v) => (v === 0 ? 'none' : `${v} m/s (${(v * 3.6).toFixed(0)} km/h)`) });
+ui.seg('wdir', [['tail', 'From behind'], ['head', 'Into your face'], ['L', 'From the left'], ['R', 'From the right']], { label: 'The wind comes', pick: true, cols: 2, value: 'R', show: (v) => v.wind > 0 });
 ui.chips([
-  { text: 'Free kick', set: { ball: 'soccer', v: 28, el: 14, rps: 9, type: 'left' } },
-  { text: 'Curveball', set: { ball: 'base', v: 38, el: 4, rps: 30, type: 'top' } },
-  { text: 'Tennis topspin', set: { ball: 'tennis', v: 30, el: 12, rps: 25, type: 'top' } },
-  { text: 'Golf drive', set: { ball: 'golf', v: 65, el: 12, rps: 45, type: 'back' } },
+  { text: 'Free kick', set: { ball: 'soccer', v: 28, el: 14, rps: 9, type: 'left', wind: 0 } },
+  { text: 'Curveball', set: { ball: 'base', v: 38, el: 4, rps: 30, type: 'top', wind: 0 } },
+  { text: 'Tennis topspin', set: { ball: 'tennis', v: 30, el: 12, rps: 25, type: 'top', wind: 0 } },
+  { text: 'Golf drive', set: { ball: 'golf', v: 65, el: 12, rps: 45, type: 'back', wind: 0 } },
+  { text: 'Free kick, crosswind', set: { ball: 'soccer', v: 28, el: 14, rps: 9, type: 'left', wind: 10, wdir: 'R' } },
+  { text: 'Golf drive, headwind', set: { ball: 'golf', v: 65, el: 12, rps: 45, type: 'back', wind: 10, wdir: 'head' } },
 ]);
-ui.check('ghost', 'Show the same shot with no spin', true);
+ui.check('ghost', 'Show the same shot with no spin (in the same wind)', true);
+ui.check('air', 'Show the air flowing past the ball (close-up)', true);
 
 const cam = new Spin.Cam3(pens[0], { az: 0.55, el: 0.3, dist: 60, fov: 34, min: 2, max: 300 });
 const AXES = { back: { x: 0, y: -1, z: 0 }, top: { x: 0, y: 1, z: 0 }, left: { x: 0, y: 0, z: 1 }, right: { x: 0, y: 0, z: -1 } };
+/** The way the air moves over the ground. 'From the right' blows toward the left (+y). */
+const windVec = () => { const { wind, wdir } = ui.v; return { x: wdir === 'tail' ? wind : wdir === 'head' ? -wind : 0, y: wdir === 'R' ? wind : wdir === 'L' ? -wind : 0, z: 0 }; };
+const WIND_WORDS = { tail: 'from behind', head: 'into your face', L: 'from the left', R: 'from the right' };
+
+/** Streamlines of the air past the ball, seen from the ball (the ball is at the origin with radius 1). They are drawn from a
+ *  simple model of the flow round a round body, not computed: the flow is bent behind the ball, away from the push. */
+function airflow(cur) {
+  const vr = cur.vr, sp = V3.len(vr);
+  if (sp < 1e-6) return;
+  const d = V3.mul(vr, -1 / sp);                                    // the way the air flows, seen from the ball
+  let pu = V3.len(cur.F) > 1e-6 ? V3.norm(cur.F) : V3.cross({ x: 0, y: 0, z: 1 }, d);
+  pu = V3.norm(V3.add(pu, V3.mul(d, -V3.dot(pu, d))));
+  const S = cur.S, CL = (2 * S) / (1 + 3.5 * S), spinning = ui.v.rps > 0, bend = spinning ? Math.min(1.1, 3.5 * CL) : 0;
+  const colr = 'rgba(120,205,255,0.6)';
+  const blocked = (q) => {                                            // is the point hidden behind the ball?
+    const c = cam.pos, w = V3.add(q, V3.mul(c, -1)), len = V3.len(w), u = V3.mul(w, 1 / len), tp = -V3.dot(c, u);
+    return tp > 0 && tp < len && V3.len(V3.add(c, V3.mul(u, tp))) < 1;
+  };
+  [-1.7, -1.2, -0.8, 0.8, 1.2, 1.7].forEach((psi, n) => {
+    const line = []; let y = psi;
+    for (let x = -2.4; x <= 2.4; x += 0.06) {
+      for (let it = 0; it < 6; it++) { const r2 = x * x + y * y; y -= (y * (r2 - 1) - psi * r2) / (x * x + 3 * y * y - 1 - 2 * psi * y); }
+      const sm = Math.min(1, Math.max(0, (x - 0.5) / 2.2)), w = sm * sm * (3 - 2 * sm);
+      line.push(V3.add(V3.mul(d, x), V3.mul(pu, y - bend * w)));
+    }
+    let run = [];
+    const flush = () => { if (run.length > 1) cam.line(run, colr, 1.6); run = []; };
+    for (const q of line) { if (blocked(q)) flush(); else run.push(q); }
+    flush();
+    cam.arrow(line[6], V3.add(line[12], V3.mul(line[6], -1)), colr, 1.6, n === 5 ? 'air' : undefined);
+  });
+  if (spinning) {
+    cam.text('with the air', V3.mul(pu, 1.85), { size: 9, color: 'rgba(170,220,255,0.95)' });
+    cam.text('against the air', V3.mul(pu, -1.85), { size: 9, color: 'rgba(170,220,255,0.7)' });
+  }
+}
 
 // The ball close up, in a corner of the 3D view. It uses the same viewing direction as the flight.
 // The turning is slowed down so that the eye can follow it: a real ball turns 9 to 60 times a second.
@@ -79,14 +120,8 @@ function closeUp(cur, dtReal) {
     for (let k = -24; k <= 24; k++) line.push(on(lam, (k / 24) * (Math.PI / 2)));
     runs(line, 'rgba(25,35,52,0.55)', 1.3);
   }
+  if (ui.v.air) airflow(cur);
   if (rps > 0) {
-    // a dot on the equator, with a short fading trail behind it
-    for (let k = 0; k < 8; k++) {
-      const a0 = spinPhase - (k + 1) * 0.1, a1 = spinPhase - k * 0.1;
-      runs([on(a0, 0), on(a1, 0)], `rgba(255,122,26,${0.8 - k * 0.1})`, 3);
-    }
-    const mark = on(spinPhase, 0);
-    if (V3.dot(mark, cam.pos) > 1) cam.dot(mark, '#ff7a1a', 5);
     // a curved arrow around the ball, in the sense of the turning, going round with it
     const arc = [], span = 1.9;
     for (let k = 0; k <= 30; k++) { const lam = spinPhase + 0.3 + (k / 30) * span; arc.push(V3.mul(on(lam, 0), 1.25)); }
@@ -110,20 +145,21 @@ function flight(spinRps) {
   const { ball, v, el, type } = ui.v, b = BALLS[ball];
   const w = spinRps * TAU, A = Math.PI * b.r * b.r;
   const axis = { back: { x: 0, y: -1, z: 0 }, top: { x: 0, y: 1, z: 0 }, left: { x: 0, y: 0, z: 1 }, right: { x: 0, y: 0, z: -1 } }[type];
+  const wv = windVec();
   const what = (s) => {
-    const sp = Math.hypot(s[3], s[4], s[5]);
+    const vv = { x: s[3] - wv.x, y: s[4] - wv.y, z: s[5] - wv.z };   // the velocity against the air
+    const sp = V3.len(vv);
     const S = (b.r * w) / Math.max(sp, 1e-6), CL = (2 * S) / (1 + 3.5 * S);
-    const vv = { x: s[3], y: s[4], z: s[5] };
     const mag = V3.cross(axis, vv); // omega-hat cross v
     const km = (0.5 * RHO * A * CL) / b.m, kd = (0.5 * RHO * A * b.cd) / b.m;
-    return { a: [km * sp * mag.x - kd * sp * vv.x, km * sp * mag.y - kd * sp * vv.y, km * sp * mag.z - kd * sp * vv.z - G], S, CL, F: V3.mul(mag, km * sp * b.m) };
+    return { a: [km * sp * mag.x - kd * sp * vv.x, km * sp * mag.y - kd * sp * vv.y, km * sp * mag.z - kd * sp * vv.z - G], S, CL, F: V3.mul(mag, km * sp * b.m), vr: vv };
   };
   let s = [0, 0, b.z0, v * Math.cos(el * DEG), 0, v * Math.sin(el * DEG)], t = 0;
-  const pts = [{ t, p: { x: s[0], y: s[1], z: s[2] }, v: { x: s[3], y: s[4], z: s[5] }, F: what(s).F, S: what(s).S }];
+  const pts = [{ t, p: { x: s[0], y: s[1], z: s[2] }, v: { x: s[3], y: s[4], z: s[5] }, F: what(s).F, S: what(s).S, vr: what(s).vr }];
   const f = (q) => { const o = what(q).a; return [q[3], q[4], q[5], o[0], o[1], o[2]]; };
   while (t < 14) {
     s = Spin.rk4(f, s, 0, 0.004); t += 0.004;
-    if (Math.round(t / 0.004) % 5 === 0) pts.push({ t, p: { x: s[0], y: s[1], z: s[2] }, v: { x: s[3], y: s[4], z: s[5] }, F: what(s).F, S: what(s).S });
+    if (Math.round(t / 0.004) % 5 === 0) pts.push({ t, p: { x: s[0], y: s[1], z: s[2] }, v: { x: s[3], y: s[4], z: s[5] }, F: what(s).F, S: what(s).S, vr: what(s).vr });
     if (s[2] <= 0 && t > 0.02) break;
   }
   return pts;
@@ -154,6 +190,10 @@ function draw(now) {
   cam.line(upto.map((q) => q.p), C.ink, 3);
   const ball = cur.p, k = R * 0.09;
   const axis = { back: { x: 0, y: -1, z: 0 }, top: { x: 0, y: 1, z: 0 }, left: { x: 0, y: 0, z: 1 }, right: { x: 0, y: 0, z: -1 } }[ui.v.type];
+  if (ui.v.wind > 0) {
+    const wv = windVec(), half = V3.mul(wv, (R * 0.015) / 2), mid = { x: R * 0.5, y: -R * 0.28, z: 0 };
+    cam.arrow(V3.add(mid, V3.mul(half, -1)), V3.mul(half, 2), '#7fd6ff', 3.4, `wind ${ui.v.wind} m/s`);
+  }
   cam.dot(ball, '#fff', 7);
   if (ui.v.rps > 0) cam.arrow(ball, V3.mul(axis, k * 0.8), C.spin, 3.2, 'spin axis');
   cam.arrow(ball, V3.mul(V3.norm(cur.v), k * 1.3), C.ball, 3, 'velocity');
@@ -180,10 +220,11 @@ function draw(now) {
   const L = s.spin[s.spin.length - 1], N = s.none[s.none.length - 1];
   const S0 = s.spin[0].S;
   const verb = { back: 'Backspin makes the ball rise and stay up longer: it goes farther.', top: 'Topspin pushes the ball down: it dips quickly.', left: 'Side-spin pushes the ball to the left.', right: 'Side-spin pushes the ball to the right.' }[ui.v.type];
-  app.explain(`${nums([['lands at', `${L.p.x.toFixed(1)} m`, `(${(L.p.x - N.p.x >= 0 ? '+' : '')}${(L.p.x - N.p.x).toFixed(1)} m against no spin)`], ['sideways', `${Math.abs(L.p.y).toFixed(1)} m`, L.p.y > 0.05 ? 'left' : L.p.y < -0.05 ? 'right' : ''], ['highest', `${s.hmax.toFixed(1)} m`, `(${s.hmaxN.toFixed(1)} m with no spin)`], ['spin ratio rω/v', S0.toFixed(2)]])}
+  app.explain(`${nums([['lands at', `${L.p.x.toFixed(1)} m`, `(${(L.p.x - N.p.x >= 0 ? '+' : '')}${(L.p.x - N.p.x).toFixed(1)} m against no spin)`], ['sideways', `${Math.abs(L.p.y).toFixed(1)} m`, L.p.y > 0.05 ? 'left' : L.p.y < -0.05 ? 'right' : ''], ['highest', `${s.hmax.toFixed(1)} m`, `(${s.hmaxN.toFixed(1)} m with no spin)`], ['spin ratio rω/v', S0.toFixed(2)], ['wind', ui.v.wind > 0 ? `${ui.v.wind} m/s` : 'none', ui.v.wind > 0 ? WIND_WORDS[ui.v.wdir] : '']])}
     <p>A spinning ball drags the air next to it round with it. On one side, the ball moves with the air that goes past it, and on the other it moves against it. The air is left curving round the ball, and the ball gets an equal push the other way. The push, the <b>Magnus force</b>, points along <b>spin axis × velocity</b> (the cross product): at right angles to both. Use the right-hand rule: curl the fingers of your right hand from the spin axis toward the velocity, and the thumb points along the push. ${verb}</p>
     <p>It is a small force next to the weight of the ball. But it acts all through the flight, so it bends the path far more than it seems it could: a free kick curves a few meters, a good curveball drops about half a meter more than gravity alone. The golf ball's backspin gives it lift, so a drive stays up for 6 seconds. The dashed path is the same shot with no spin, for comparison. The drag from the air is included for both.</p>
-    <p>This is not the Coriolis effect. The Magnus force is a real force from the air, and it needs the ball to spin. The Coriolis effect is a pretend force of a turning frame such as the Earth, and it acts on any moving ball, spinning or not. Both are written with a cross product, which is why they look alike. For a free kick, Coriolis bends the path by about 3 mm. The Magnus force bends it by metres.</p>`);
+    <p>This is not the Coriolis effect. The Magnus force is a real force from the air, and it needs the ball to spin. The Coriolis effect is a pretend force of a turning frame such as the Earth, and it acts on any moving ball, spinning or not. Both are written with a cross product, which is why they look alike. For a free kick, Coriolis bends the path by about 3 mm. The Magnus force bends it by metres.</p>${ui.v.wind > 0 ? `
+    <p><b>Wind.</b> The wind moves the air, not the ball. What the ball feels is its velocity <b>against the air</b>, and both the drag and the Magnus force depend on it. A wind into your face raises the speed through the air: more drag, so the ball loses speed and range, and more lift for backspin. A wind from behind does the reverse. A crosswind pushes the ball sideways through the drag, and the curve from the spin adds to it or works against it. The dashed path is flown in the same wind.</p>` : ''}`);
 }
 tr.restart();
 Spin.run(draw);

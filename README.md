@@ -39,7 +39,8 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
 - `rolling`: a point on a rolling wheel (hub, rim, flange), slipping and skidding, and the turning
   point. The cycloid, 8R long, with an area of 3πR².
 - `magnus`: why a spinning ball curves. Spin axis × velocity gives the push: a free kick, a curveball,
-  a topspin lob, a golf drive, with drag and a "no spin" path to compare.
+  a topspin lob, a golf drive, with drag, a wind (head, tail or cross) and a "no spin" path to compare.
+  A close-up shows the ball turning and the air flowing past it.
 - `race`: a ring, a disk, a cylinder and a sphere race down a slope (the shape of the mass decides
   the winner, not the mass), and a spool pulled by a thread rolls toward you or away from you.
 
