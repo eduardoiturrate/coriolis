@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Balance and dizziness · Spin</title>
+<meta name="description" content="Standing is balancing a tall body on small feet, with a delay in the reflexes: try a shove, a slow reflex and a short foot. And the inner ear senses turning with fluid, which is why you feel dizzy after you stop spinning." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, nums, TAU, DEG, clamp } = Spin;
+
+const app = Spin.app({
+  slug: 'balance',
+  sub: 'Two ways the body deals with rotation: it keeps a tall body from tipping over, and the inner ear measures turning with a ring of fluid.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Start', speed: { min: 0.1, max: 2, value: 1, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['stand', 'Standing'], ['canals', 'The inner ear']]);
+const is = (m) => (v) => v.mode === m;
+
+// Standing
+ui.slider('push', { label: 'Shove at the start', min: 0, max: 0.3, step: 0.01, value: 0.1, fmt: (v) => (v === 0 ? 'none' : `${v.toFixed(2)} (the speed it starts to tip, rad/s)`), show: is('stand') });
+ui.slider('delay', { label: 'Delay of the reflex', min: 50, max: 350, step: 10, value: 120, fmt: (v) => `${v} ms`, show: is('stand') });
+ui.slider('gain', { label: 'Strength of the ankle response', min: 1.05, max: 3, step: 0.05, value: 1.5, fmt: (v) => `${v.toFixed(2)} × what gravity needs`, show: is('stand') });
+ui.slider('foot', { label: 'How far the pressure can move under the foot', min: 4, max: 12, step: 1, value: 10, fmt: (v) => `±${v} cm from the ankle`, show: is('stand') });
+ui.check('jolts', 'Small random jolts, as in quiet standing', true, { show: is('stand') });
+ui.chips([{ text: 'A normal person', set: { delay: 120, gain: 1.5, foot: 10, push: 0.1 } }, { text: 'Tired, or eyes closed', set: { delay: 220, gain: 1.3, foot: 10, push: 0.1 } }, { text: 'A very slow reflex', set: { delay: 320, gain: 1.5, foot: 10, push: 0.1 } }, { text: 'A hard shove', set: { delay: 120, gain: 1.5, foot: 10, push: 0.25 } }], { show: is('stand') });
+// The inner ear
+ui.slider('w0', { label: 'Turning of the chair', min: 0.2, max: 1, step: 0.05, value: 0.5, fmt: (v) => `${v.toFixed(2)} turns a second`, show: is('canals') });
+ui.slider('hold', { label: 'How long you keep turning at that rate', min: 5, max: 60, step: 1, value: 30, fmt: (v) => `${v} s`, show: is('canals') });
+ui.slider('tc', { label: 'How fast the fluid catches up (time constant)', min: 3, max: 20, step: 1, value: 6, fmt: (v) => `${v} s`, show: is('canals') });
+ui.on((id) => { if (id === 'mode') setup(); model = null; tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  app.caption(0, m === 'stand' ? 'A person seen from the side (the tilt is drawn 4 times larger)' : 'A person on a turning chair, seen from above (turning drawn slower)');
+  app.caption(1, m === 'stand' ? 'The lean, and the pressure under the foot' : 'What the chair does, what the ear reports, and the eyes');
+  tr.setGo(m === 'stand' ? 'Shove' : 'Spin me');
+}
+
+// ---------- Standing: a tall pendulum, with a reflex that comes late ----------
+const MASS = 70, g = 9.81, LH = 1.0, JJ = 80, A = MASS * g * LH;
+let model = null;
+function standSim() {
+  const { push, delay, gain, foot, jolts } = ui.v, dt = 0.001, T = 10;
+  const Kp = gain * A, Kd = 0.35 * Kp, tmax = MASS * g * (foot / 100);
+  let th = 0, w = push, fallAt = null, seed = 7, nz = 0;
+  const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647 - 0.5; };
+  const nd = Math.round(delay / 1000 / dt), H = [], W = [], out = [];
+  for (let k = 0; k * dt < T; k++) {
+    H.push(th); W.push(w);
+    const thd = k >= nd ? H[k - nd] : 0, wd = k >= nd ? W[k - nd] : 0;
+    nz += ((jolts ? rnd() * 120 : 0) - nz) * dt / 0.05;
+    let tau = fallAt === null ? clamp(-Kp * thd - Kd * wd, -tmax, tmax) : 0;
+    w += ((A * Math.sin(th) + tau + nz) / JJ) * dt; th += w * dt;
+    if (fallAt === null && Math.abs(th) > 0.25) fallAt = k * dt;
+    if (k % 5 === 0) out.push({ t: k * dt, th, cop: tau / (MASS * g) });
+    if (Math.abs(th) > 1.45) break;
+  }
+  const peak = Math.max(...out.filter((p) => fallAt === null || p.t < fallAt).map((p) => Math.abs(p.th))) / DEG;
+  return { kind: 'stand', out, fallAt, peak, T, key: JSON.stringify(ui.v) };
+}
+function drawStand() {
+  if (!model || model.kind !== 'stand' || model.key !== JSON.stringify(ui.v)) model = standSim();
+  const m = model, t = Math.min(tr.t, m.T), foot = ui.v.foot / 100;
+  if (tr.running && tr.t > m.T + 1) tr.finish();
+  const k = Math.min(m.out.length - 1, Math.round(t / 0.005)), s = m.out[k];
+  const fell = m.fallAt !== null && t >= m.fallAt;
+  const L = pens[0].begin().box(-1.3, 1.3, -0.25, 2.1, 10);
+  L.line([{ x: -1.3, y: 0 }, { x: 1.3, y: 0 }], 'rgba(155,231,166,0.7)', 3);
+  L.poly([{ x: -0.08, y: 0 }, { x: 0.18, y: 0 }, { x: 0.18, y: 0.06 }, { x: -0.08, y: 0.06 }], { fill: 'rgba(255,255,255,0.18)', stroke: '#cfd8e3', width: 1.5 });
+  L.line([{ x: -foot, y: -0.07 }, { x: foot, y: -0.07 }], 'rgba(255,213,79,0.7)', 3);
+  L.text('where the pressure can go', { x: 0, y: -0.15 }, { size: 10, color: 'rgba(255,213,79,0.85)' });
+  const ang = fell ? s.th : clamp(s.th * 4, -0.7, 0.7);
+  const up = { x: Math.sin(ang), y: Math.cos(ang) };
+  const P = (h) => ({ x: up.x * h, y: 0.06 + up.y * h });
+  L.line([{ x: 0, y: 0.06 }, P(1.0)], '#e9eef5', 6); L.line([P(1.0), P(1.55)], '#e9eef5', 5);
+  L.circle(P(1.72), 0.12, { fill: '#e9eef5', stroke: '#fff', width: 1 });
+  L.dot(P(1.0), '#ff9a3c', 6);
+  L.dot({ x: clamp(s.cop, -foot, foot), y: -0.07 }, '#ff9a3c', 7);
+  L.dot({ x: 0, y: 0.06 }, '#9be7a6', 4);
+  L.note(fell ? 'It has fallen: the foot cannot catch it any more' : 'Orange dots: the centre of mass, and the pressure under the foot');
+
+  const R = pens[1].begin(), h = R.ch / 2 - 4, win = m.out.slice(0, k + 1);
+  const lim = Math.max(2, Math.min(15, Math.max(...m.out.map((p) => Math.abs(p.th))) / DEG * 1.1));
+  const c1 = R.chart({ x: 4, y: 2, w: R.cw - 8, h }, { x0: 0, x1: m.T, y0: -lim, y1: lim, title: 'Lean (degrees; forward is up)', xTicks: 5, yTicks: 4, padB: 8, fmtY: (v) => v.toFixed(1) });
+  c1.hline(0, 'rgba(255,255,255,0.3)', [1, 0]);
+  if (m.fallAt !== null) c1.vline(m.fallAt, 'rgba(255,82,82,0.7)');
+  c1.line(win.map((p) => ({ x: p.t, y: clamp(p.th / DEG, -lim, lim) })), '#ffd54f', 3);
+  const c2 = R.chart({ x: 4, y: h + 8, w: R.cw - 8, h }, { x0: 0, x1: m.T, y0: -13, y1: 13, title: 'Centre of pressure under the foot (cm). The yellow lines are the limits.', xTicks: 5, yTicks: 4, xTitle: 'time (s)', fmtY: (v) => v.toFixed(0) });
+  c2.hline(foot * 100, 'rgba(255,213,79,0.7)', [4, 4]); c2.hline(-foot * 100, 'rgba(255,213,79,0.7)', [4, 4]);
+  c2.line(win.map((p) => ({ x: p.t, y: p.cop * 100 })), '#ff9a3c', 2.6);
+
+  const crit = m.fallAt !== null;
+  app.explain(`${nums([['result', crit ? `falls after ${m.fallAt.toFixed(1)} s` : 'stays up'], ['largest lean', `${m.peak.toFixed(1)}°`], ['reflex delay', `${ui.v.delay} ms`], ['most the foot can correct', `${(foot * MASS * g).toFixed(0)} N m`, `(${((foot * MASS * g) / A * 100).toFixed(0)}% of the tipping torque per radian)`]])}
+    <p>A standing person is a tall pendulum balanced upside down on a small foot. Gravity pulls the body over: the more it leans, the stronger the pull, so a lean grows by itself. To stay up, the body has to press harder with the toes or the heels, which moves the pressure under the foot and makes a torque at the ankle that turns the body back. That is the orange dot in the picture. It acts like a spring and a damper, both set by the reflexes.</p>
+    <p>But the reflex comes late. Seeing, feeling and moving take about 0.1 to 0.2 s, and in that time the lean has already grown. If the delay is long, or the response is weak, the correction arrives too late, and it pushes in the wrong direction. Try a delay of 320 ms: the sway grows and the person falls. A hard shove also falls: the pressure can only move as far as the foot is long, and then no more torque is possible. This is why balance is poorer with age, with tiredness, with alcohol, and with the eyes closed, and why a long stride or a wide stance helps.</p>
+    <p>The model is a single stiff pendulum that corrects only at the ankle. People also bend at the hips for a larger shove, and take a step.</p>`);
+}
+
+// ---------- The inner ear ----------
+function canalSim() {
+  const { w0, hold, tc } = ui.v, dt = 0.02, up = 2, down = 1, tEnd = up + hold + down + 35;
+  const om = (t) => (t < 0.5 ? 0 : t < 0.5 + up ? (w0 * (t - 0.5)) / up : t < 0.5 + up + hold ? w0 : t < 0.5 + up + hold + down ? (w0 * (0.5 + up + hold + down - t)) / down : 0) * TAU;
+  const out = []; let p = 0, e = 0, chair = 0, last = om(0);
+  for (let t = 0; t <= tEnd; t += dt) {
+    const w = om(t);
+    p += (w - last) - (p / tc) * dt; last = w;                      // what the canals report: a high-pass filter of the turning
+    e += -0.7 * p * dt; let jump = false;
+    if (Math.abs(e) > 0.26) { e = -Math.sign(e) * 0.26; jump = true; }
+    chair += w * dt;
+    out.push({ t, w, p, e, chair });
+  }
+  return { kind: 'canals', out, tEnd, up, hold, key: JSON.stringify(ui.v) };
+}
+function drawCanals() {
+  if (!model || model.kind !== 'canals' || model.key !== JSON.stringify(ui.v)) model = canalSim();
+  const m = model, rate = 12, t = Math.min(tr.t * rate, m.tEnd);
+  if (tr.running && tr.t * rate > m.tEnd + 12) tr.finish();
+  const k = Math.min(m.out.length - 1, Math.round(t / 0.02)), s = m.out[k];
+  const L = pens[0].begin().box(-1.15, 1.15, -1.15, 1.15, 8);
+  const rot = (a, r) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
+  const ph = s.chair * 0.08;                                          // the chair, drawn turning slowly
+  L.circle({ x: 0, y: 0 }, 1.08, { stroke: 'rgba(255,255,255,0.14)', width: 1.5, dash: [3, 6] });
+  for (let j = 0; j < 12; j++) L.line([rot(ph + (j * TAU) / 12, 1.0), rot(ph + (j * TAU) / 12, 1.08)], 'rgba(255,255,255,0.3)', 1.5);
+  L.circle({ x: 0, y: 0 }, 0.3, { fill: '#cfd8e3', stroke: '#fff', width: 1.5 });
+  L.line([rot(ph + Math.PI / 2, 0.3), rot(ph + Math.PI / 2, 0.42)], '#ff9a3c', 4);                 // the nose
+  L.circle({ x: 0, y: 0 }, 0.7, { stroke: 'rgba(79,195,247,0.8)', width: 6 });                         // one horizontal canal, turning with the head
+  const a0 = ph + Math.PI, dev = -s.p * 0.23;
+  for (let j = 0; j <= 16; j++) { /* the fluid, displaced from its rest place */ }
+  const arc = []; for (let j = 0; j <= 16; j++) arc.push(rot(a0 + (dev * j) / 16, 0.7));
+  L.line(arc, '#ffd54f', 6);
+  L.dot(rot(a0 + dev, 0.7), '#ffd54f', 8);
+  L.line([rot(a0, 0.6), rot(a0, 0.8)], '#fff', 3);
+  L.text('the fluid', rot(a0 + dev, 0.92), { size: 10.5, color: '#ffd54f' });
+  L.note(s.w > 0.05 ? `The chair turns at ${(s.w / TAU).toFixed(2)} turns a second` : 'The chair is still');
+
+  const R = pens[1].begin(), h = R.ch * 0.6 - 4;
+  const win = m.out.slice(0, k + 1), top = ui.v.w0 * 1.15;
+  const c1 = R.chart({ x: 4, y: 2, w: R.cw - 8, h }, { x0: 0, x1: m.tEnd, y0: -top, y1: top, title: 'Turning (turns a second): the chair (white) and what you feel (orange)', xTicks: 6, yTicks: 4, padB: 8, fmtY: (v) => v.toFixed(1) });
+  c1.hline(0, 'rgba(255,255,255,0.3)', [1, 0]);
+  c1.line(win.map((p) => ({ x: p.t, y: p.w / TAU })), '#ffffff', 2.4); c1.line(win.map((p) => ({ x: p.t, y: p.p / TAU })), '#ff9a3c', 3);
+  const w0 = Math.max(0, t - 10);
+  const c2 = R.chart({ x: 4, y: h + 8, w: R.cw - 8, h: R.ch - h - 12 }, { x0: w0, x1: w0 + 10, y0: -18, y1: 18, title: 'Where the eyes point (degrees), the last 10 s: slow drift, quick jump', xTicks: 5, yTicks: 2, xTitle: 'time (s)', fmtY: (v) => v.toFixed(0) });
+  c2.line(win.filter((p) => p.t >= w0).map((p) => ({ x: p.t, y: p.e / DEG })), '#4fc3f7', 1.8);
+  const tc = ui.v.tc, stopT = 0.5 + m.up + m.hold + 1;
+  app.explain(`${nums([['chair turning', `${ui.v.w0.toFixed(2)} turns a second`], ['you stop feeling it after about', `${(tc * 3).toFixed(0)} s`], ['after the stop you feel a turn of', `${ui.v.w0.toFixed(2)}`, 'turns a second, the other way'], ['that fades in about', `${(tc * 3).toFixed(0)} s`]])}
+    <p>In each inner ear there are three rings of fluid, the <b>semicircular canals</b>, one for each way the head can turn. When the head turns, the fluid, because of its inertia, lags behind the ring, and a small flap in the ring, the cupula, bends. The brain reads the bend as turning. It is the one organ that measures rotation directly, with no outside reference. That is the sense in which rotation can be felt from inside.</p>
+    <p>But the fluid is slowly dragged along by the walls of the ring. In a steady turn it catches up, the flap straightens, and you feel nothing, even though you still turn. This is the orange line: it jumps up when the chair starts, and then fades with the time constant of the fluid. When the chair stops, the fluid does not: it keeps going, the flap bends the other way, and you feel a turn in the opposite direction at the same rate. That is the dizziness after spinning. The eyes follow the false signal, drifting slowly one way and then jumping back (the jerks are called nystagmus), so the room seems to turn. You can make it last longer or shorter with the time constant.</p>
+    <p>The chair turning is drawn much slower than in the graph, so that you can follow the dots.</p>`);
+}
+
+function draw(now) {
+  tr.step(now);
+  if (ui.v.mode === 'stand') drawStand(); else drawCanals();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

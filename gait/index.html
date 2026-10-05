@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Walking and running · Spin</title>
+<meta name="description" content="Why the arms swing when you walk. Seen from above, both legs turn the body the same way about a vertical axis at each step, and the arms swing the other way to cancel it." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'gait',
+  sub: 'Each step swings one leg forward and the other back. Seen from above, that is a turning push on the body, and the arms are there to cancel it.',
+  views: [{ caption: 'The walker, seen from above' }, { caption: 'Angular momentum about the vertical axis, and the twist it would cause' }],
+  go: 'Restart', speed: { min: 0.1, max: 1.5, value: 0.7, step: 0.05 }, autostart: true,
+});
+const { ui, tr, pens } = app;
+
+ui.seg('pace', [['walk', 'Walking'], ['run', 'Running']], { label: 'Pace', value: 'walk' });
+ui.slider('arms', { label: 'How far the arms swing', min: 0, max: 150, step: 5, value: 55, fmt: (v) => (v === 100 ? '100%: exactly cancels the legs' : `${v}% of the swing that cancels the legs`) });
+ui.chips([{ text: 'Arms held still', set: { arms: 0 } }, { text: 'Natural swing', set: { arms: 55 } }, { text: 'Full cancel', set: { arms: 100 } }]);
+ui.check('wrong', 'Swing the arms the wrong way (the arm on the side of the forward leg goes forward)', false);
+app.credit('Rough numbers for an adult: each leg 11 kg, each arm 4 kg, the trunk 1.5 kg m² about the vertical axis.');
+
+// One gait cycle: the right leg swings by +theta sin(wt), the left by the opposite. The arm on the same side swings the other way.
+const PACE = { walk: { f: 0.9, leg: 0.35, v: 1.4 }, run: { f: 1.4, leg: 0.65, v: 3.0 } };
+const ML = 11, DL = 0.1, RL = 0.45, MA = 4, DA = 0.22, RA = 0.3, IT = 1.5;      // masses, sideways offsets, distance of the centre of mass from the joint, trunk inertia
+function model() {
+  const { pace, arms, wrong } = ui.v, P = PACE[pace], w = TAU * P.f;
+  const aLeg = 2 * ML * DL * RL * P.leg * w;                                     // amplitude of the angular momentum of the legs
+  const th100 = (ML * DL * RL * P.leg) / (MA * DA * RA);                          // arm swing (radians) that cancels the legs
+  const thArm = (th100 * arms) / 100, s = wrong ? 1 : -1;
+  const aArm = 2 * MA * DA * RA * thArm * w * s;
+  return { P, w, aLeg, aArm, th100, thArm, s, aNet: aLeg + aArm };
+}
+function draw(now) {
+  tr.step(now);
+  const m = model(), t = tr.t, ph = m.w * t;
+  const sin = Math.sin(ph), psi = -(m.aNet / (IT * m.w)) * sin;                  // the twist of the body, in radians
+  const rot = (p) => ({ x: p.x * Math.cos(psi) - p.y * Math.sin(psi), y: p.x * Math.sin(psi) + p.y * Math.cos(psi) });
+  const thR = m.P.leg * sin, thAR = m.s * m.thArm * sin;
+  const feet = [{ x: 0.12, y: 0.9 * Math.sin(thR) }, { x: -0.12, y: -0.9 * Math.sin(thR) }];
+  const hands = [{ x: 0.3, y: 0.65 * Math.sin(thAR) }, { x: -0.3, y: -0.65 * Math.sin(thAR) }];
+
+  const L = pens[0].begin().box(-1.0, 1.0, -1.1, 1.1, 10);
+  const off = (m.P.v * t) % 0.5;
+  for (let y = -1.6 + off; y < 1.6; y += 0.5) L.line([{ x: -1.0, y: -y }, { x: 1.0, y: -y }], 'rgba(155,231,166,0.18)', 1);
+  const hip = [{ x: -0.1, y: -0.05 }, { x: 0.1, y: -0.05 }], sh = [{ x: -0.22, y: 0.12 }, { x: 0.22, y: 0.12 }];
+  L.line([rot(hip[0]), rot(hip[1])], '#4fc3f7', 6); L.line([rot(sh[0]), rot(sh[1])], '#ff9a3c', 6);
+  L.line([rot({ x: 0, y: -0.05 }), rot({ x: 0, y: 0.12 })], '#cfd8e3', 4);
+  L.circle(rot({ x: 0, y: 0.2 }), 0.09, { fill: '#cfd8e3', stroke: '#fff', width: 1 });
+  [[hip[1], feet[0]], [hip[0], feet[1]]].forEach(([a, b], i) => { L.line([rot(a), rot(b)], '#4fc3f7', 4); L.dot(rot(b), '#8ed8ff', 7); });
+  [[{ x: 0.22, y: 0.12 }, hands[0]], [{ x: -0.22, y: 0.12 }, hands[1]]].forEach(([a, b]) => { L.line([rot(a), rot(b)], '#ff9a3c', 3.5); L.dot(rot(b), '#ffb36b', 6); });
+  L.text('legs', { x: 0.7, y: -0.85 }, { size: 11, color: '#4fc3f7' }); L.text('arms', { x: 0.7, y: -1.0 }, { size: 11, color: '#ffb36b' });
+  L.note(Math.abs(psi) / DEG < 1 ? 'The body stays steady' : `The body is twisted ${Math.abs(psi / DEG).toFixed(0)}° to the ${psi > 0 ? 'left' : 'right'}`);
+
+  const R = pens[1].begin(), h = R.ch / 2 - 4, T0 = Math.max(0, t - 3), pts = [];
+  const lim = Math.max(1, m.aLeg) * 1.25, wdeg = Math.max(0.1, Math.abs(m.aLeg) / (IT * m.w)) * 1.2 / DEG;
+  const samples = (fn) => { const o = []; for (let x = T0; x <= T0 + 3 + 1e-9; x += 0.03) o.push({ x, y: fn(x) }); return o; };
+  const c1 = R.chart({ x: 4, y: 2, w: R.cw - 8, h }, { x0: T0, x1: T0 + 3, y0: -lim, y1: lim, title: 'Angular momentum (kg m²/s): legs (blue), arms (orange), the two together (white)', xTicks: 3, yTicks: 4, padB: 8, fmtX: () => '', fmtY: (v) => v.toFixed(0) });
+  c1.hline(0, 'rgba(255,255,255,0.3)', [1, 0]);
+  c1.line(samples((x) => m.aLeg * Math.cos(m.w * x)), '#4fc3f7', 2.4); c1.line(samples((x) => m.aArm * Math.cos(m.w * x)), '#ffb36b', 2.4); c1.line(samples((x) => m.aNet * Math.cos(m.w * x)), '#ffffff', 3.2);
+  const c2 = R.chart({ x: 4, y: h + 8, w: R.cw - 8, h }, { x0: T0, x1: T0 + 3, y0: -wdeg, y1: wdeg, title: 'Twist of the body (degrees), if nothing else holds it. Dashed: with no arm swing', xTicks: 3, yTicks: 4, xTitle: 'time (s)', fmtX: () => '', fmtY: (v) => v.toFixed(0) });
+  c2.hline(0, 'rgba(255,255,255,0.3)', [1, 0]);
+  c2.line(samples((x) => (-(m.aLeg / (IT * m.w)) * Math.sin(m.w * x)) / DEG), 'rgba(255,255,255,0.35)', 1.6, [4, 4]);
+  c2.line(samples((x) => (-(m.aNet / (IT * m.w)) * Math.sin(m.w * x)) / DEG), '#ffd54f', 3);
+  c2.dot(t, psi / DEG, '#fff', 5);
+
+  const twistAmp = Math.abs(m.aNet) / (IT * m.w) / DEG, bare = m.aLeg / (IT * m.w) / DEG;
+  app.explain(`${nums([['legs: angular momentum', `${m.aLeg.toFixed(1)}`, 'kg m²/s, each way'], ['arms: swing that cancels the legs', `${(m.th100 / DEG).toFixed(0)}°`, 'each way'], ['arm swing now', `${(m.thArm / DEG).toFixed(0)}°`], ['twist of the body without help', `${twistAmp.toFixed(1)}°`, `(${bare.toFixed(1)}° with the arms still)`]])}
+    <p>Each step swings one leg forward and the other back. Seen from above, the two legs are on opposite sides of the body's middle line and swing in opposite directions, so they both push the body round the same way about a vertical axis. Their angular momentum <b>adds</b>. With nothing to balance it, the body would twist to one side at each step, and back at the next. The graph shows it: the blue line is the legs.</p>
+    <p>The arms swing the other way, the right arm forward when the left leg is forward. The arms are lighter and closer to the middle than the legs, so they must swing farther to make up the difference: the orange line is the arms, and the white line, the total, is what the body has to deal with. At 100% the total is zero. People swing the arms about halfway to that, and the trunk twists a little for the rest. Try the arms held still, and then the wrong way: the twist doubles.</p>
+    <p>In real walking the foot on the ground can also twist the body, through friction, so the body is never as unsteady as the dashed line. But the arms save the foot that work. Experiments find that walking with the arms held still costs about 10% more energy. Running swings the legs farther and faster, so the angular momentum is much larger, and so is the swing of the arms.</p>`);
+}
+Spin.run(draw);
+</script>
+</body>
+</html>

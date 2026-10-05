@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Divers and gymnasts · Spin</title>
+<meta name="description" content="In the air, a diver keeps the angular momentum from take-off. Tuck to turn faster, stretch to slow down, and start a twist with the arms, without touching anything." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, V3, fmt, nums, TAU, DEG, clamp } = Spin;
+const G = 9.81;
+
+const app = Spin.app({
+  slug: 'diver',
+  sub: 'Once a diver leaves the board, nothing can change the angular momentum. The body can only share it out differently.',
+  views: [{ caption: '' }, { caption: '' }],
+  go: 'Dive', speed: { min: 0.1, max: 1.5, value: 0.6, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+app.modes('mode', [['tuck', 'Tuck and stretch'], ['twist', 'Twist']]);
+const is = (m) => (v) => v.mode === m;
+
+// Tuck and stretch
+ui.seg('plat', [[1, '1 m'], [3, '3 m board'], [5, '5 m'], [10, '10 m']], { label: 'Height of the board or platform', value: 10, show: is('tuck') });
+ui.slider('rev', { label: 'Turning at take-off, body stretched', min: 0.2, max: 0.9, step: 0.01, value: 0.45, fmt: (v) => `${v.toFixed(2)} turns a second`, show: is('tuck') });
+ui.seg('shape', [['tuck', 'Tuck (knees to chest)'], ['pike', 'Pike (bent at the hips)']], { label: 'Shape in the middle', value: 'tuck', show: is('tuck') });
+ui.slider('t1', { label: 'Pull in at', min: 5, max: 50, step: 1, value: 12, fmt: (v) => `${v}% of the flight`, show: is('tuck') });
+ui.slider('t2', { label: 'Stretch out again at', min: 45, max: 95, step: 1, value: 78, fmt: (v) => `${v}% of the flight`, show: is('tuck') });
+ui.chips([{ text: '2½ somersaults, 10 m', set: { plat: 10, rev: 0.34, shape: 'tuck', t1: 12, t2: 78 } }, { text: '3½ somersaults, 10 m', set: { plat: 10, rev: 0.5, shape: 'tuck', t1: 12, t2: 82 } }, { text: 'No tuck at all', set: { t1: 50, t2: 50 } }], { show: is('tuck') });
+ui.check('ghost', 'Show the diver every 0.25 s', true, { show: is('tuck') });
+// Twist
+ui.seg('how', [['air', 'Start it in the air, with the arms'], ['board', 'Start it on the board']], { label: 'How the twist begins', pick: true, cols: 1, value: 'air', show: is('twist') });
+ui.seg('pat', [['fb', 'Right arm forward, left arm back'], ['ud', 'Right arm up, left arm down'], ['fd', 'Right arm forward, left arm down']], { label: 'The arm movement', pick: true, cols: 1, value: 'fd', show: (v) => v.mode === 'twist' && v.how === 'air' });
+ui.slider('hold', { label: 'Hold the arms like that for', min: 0.1, max: 1.5, step: 0.05, value: 1.0, fmt: (v) => `${v.toFixed(2)} s`, show: (v) => v.mode === 'twist' && v.how === 'air' });
+ui.slider('lz0', { label: 'Twist given on the board', min: 0, max: 1, step: 0.05, value: 0.4, fmt: (v) => `${v.toFixed(2)} turns a second (arms in)`, show: (v) => v.mode === 'twist' && v.how === 'board' });
+ui.seg('arms', [['down', 'Arms by the sides'], ['out', 'Arms out, then in']], { label: 'Arms', value: 'out', show: (v) => v.mode === 'twist' && v.how === 'board' });
+ui.slider('rev2', { label: 'Somersault turning', min: 0.2, max: 0.8, step: 0.01, value: 0.45, fmt: (v) => `${v.toFixed(2)} turns a second`, show: is('twist') });
+
+ui.on((id) => { if (id === 'mode') setup(); model = null; tr.restart(); });
+function setup() {
+  const m = ui.v.mode;
+  app.caption(0, m === 'tuck' ? 'The dive, seen from the side' : 'The body in the air (drag to turn the view)');
+  app.caption(1, m === 'tuck' ? 'Turning rate and moment of inertia' : 'The twist, and the tilt that makes it');
+  cam.setActive(m === 'twist');
+}
+
+// ---------- Tuck and stretch ----------
+
+const IS = { straight: 15, pike: 8, tuck: 3.5 };            // moment of inertia about the side-to-side axis, kg m^2
+const POSE = {
+  straight: { head: [0, 0.72], neck: [0, 0.55], sh: [0, 0.5], hip: [0, -0.05], knee: [0, -0.5], foot: [0, -0.95], hand: [0, 1.2] },
+  tuck: { head: [0.17, 0.42], neck: [0.08, 0.3], sh: [0.06, 0.26], hip: [-0.14, -0.04], knee: [0.2, 0.1], foot: [-0.12, -0.16], hand: [0.13, 0.0] },
+  pike: { head: [0.42, 0.34], neck: [0.32, 0.24], sh: [0.3, 0.2], hip: [0, -0.02], knee: [0.38, -0.04], foot: [0.76, -0.06], hand: [0.7, -0.05] },
+};
+const ease = (x) => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
+let model = null;
+function dive() {
+  const { plat, rev, shape, t1, t2 } = ui.v;
+  const v0 = 3.5, y0 = plat + 1, vx = 1.0;
+  const T = (v0 + Math.sqrt(v0 * v0 + 2 * G * (y0 - 0.9))) / G;
+  const L = IS.straight * rev * TAU, ramp = 0.15;
+  const ta = (t1 / 100) * T, tb = Math.max(ta + 0.4, (t2 / 100) * T);
+  const u = (t) => ease((t - ta) / ramp) - ease((t - tb) / ramp);
+  const I = (t) => IS.straight + (IS[shape] - IS.straight) * u(t);
+  const dt = 0.004, pts = []; let th = 0;
+  for (let t = 0; t <= T + 1e-9; t += dt) { const w = L / I(t); pts.push({ t, th, w, I: I(t), u: u(t), x: vx * t, y: y0 + v0 * t - 0.5 * G * t * t }); th += w * dt; }
+  const end = pts[pts.length - 1];
+  return { kind: 'tuck', T, L, pts, end, key: JSON.stringify(ui.v) };
+}
+function figure2D(pen, c, th, u, shape, color, width) {
+  const a = POSE.straight, b = POSE[shape], q = {};
+  for (const k in a) q[k] = [a[k][0] + (b[k][0] - a[k][0]) * u, a[k][1] + (b[k][1] - a[k][1]) * u];
+  const P = (k) => { const [x, y] = q[k]; return { x: c.x + x * Math.cos(th) + y * Math.sin(th), y: c.y - x * Math.sin(th) + y * Math.cos(th) }; };
+  pen.line([P('neck'), P('hip')], color, width + 1);
+  pen.line([P('hip'), P('knee'), P('foot')], color, width + 1);
+  pen.line([P('sh'), P('hand')], color, width);
+  pen.circle(P('head'), 0.12, { stroke: color, fill: color, width: 1 });
+}
+function drawTuck() {
+  if (!model || model.kind !== 'tuck' || model.key !== JSON.stringify(ui.v)) model = dive();
+  const m = model, { plat, shape } = ui.v;
+  const t = Math.min(tr.t * 1.0, m.T);
+  if (tr.running && tr.t > m.T + 1) tr.finish();
+  const k = Math.min(m.pts.length - 1, Math.round(t / 0.004)), cur = m.pts[k];
+  const pen = pens[0].begin();
+  pen.box(cur.x - 1.9, cur.x + 1.9, cur.y - 2.3, cur.y + 2.3, 6);
+  // the water, the platform
+  pen.rect(cur.x - 12, -8, cur.x + 12, 0, { fill: 'rgba(79,195,247,0.22)', stroke: 'rgba(79,195,247,0.7)', width: 2 });
+  pen.rect(-3, plat - 0.25, 0, plat, { fill: '#5b6779', stroke: '#9aa7b8', width: 1.5 });
+  if (ui.v.ghost) for (let i = 0; i < k; i += Math.round(0.25 / 0.004)) { const g = m.pts[i]; figure2D(pen, g, g.th, g.u, shape, 'rgba(255,255,255,0.22)', 1.5); }
+  figure2D(pen, cur, cur.th, cur.u, shape, '#ffd54f', 4.5);
+  pen.dot(cur, '#ff9a3c', 3.5);
+  pen.note(cur.u > 0.5 ? 'Tucked: the moment of inertia is small, so it turns fast' : cur.u > 0.02 ? 'Changing shape' : 'Stretched: it turns slowly');
+
+  const R = pens[1].begin(), h = R.ch / 2 - 4;
+  const base = m.L / IS.straight / TAU;
+  const c1 = R.chart({ x: 4, y: 2, w: R.cw - 8, h }, { x0: 0, x1: m.T, y0: 0, y1: m.L / IS[shape] / TAU * 1.12, title: 'Turning rate (turns a second)', xTicks: 6, yTicks: 4, padB: 8, fmtY: (v) => v.toFixed(1) });
+  c1.hline(base, 'rgba(255,255,255,0.3)'); c1.text('stretched all the way', m.T * 0.72, base, { align: 'center', dy: -9, size: 10, color: 'rgba(255,255,255,0.55)' });
+  c1.line(m.pts.slice(0, k + 1).map((p) => ({ x: p.t, y: p.w / TAU })), '#ffd54f', 3); c1.dot(cur.t, cur.w / TAU, '#fff', 5);
+  const c2 = R.chart({ x: 4, y: h + 8, w: R.cw - 8, h }, { x0: 0, x1: m.T, y0: 0, y1: 17, title: 'Moment of inertia (kg m²). Turning rate × this stays the same.', xTicks: 6, yTicks: 4, xTitle: 'time (s)', fmtY: (v) => v.toFixed(0) });
+  c2.line(m.pts.slice(0, k + 1).map((p) => ({ x: p.t, y: p.I })), '#4fc3f7', 3); c2.dot(cur.t, cur.I, '#fff', 5);
+
+  const turns = m.end.th / TAU, half = Math.round(turns * 2), off = Math.abs(turns * 2 - half) / 2 * 360;
+  const kind = half % 2 ? 'head first' : 'feet first';
+  const ok = off < 20;
+  app.explain(`${nums([['turns at the water', turns.toFixed(2)], ['entry', `${kind}, ${off.toFixed(0)}° off vertical`, ok ? '(a clean entry)' : '(a splash)'], ['time in the air', `${m.T.toFixed(2)} s`], ['turning rate: stretched, then tucked', `${(m.L / IS.straight / TAU).toFixed(2)} → ${(m.L / IS[shape] / TAU).toFixed(2)} turns a second`]])}
+    <p>A diver leaves the board turning a little. That turning is the <b>angular momentum</b> L, and in the air nothing can change it: there is nothing to push against. L is the moment of inertia I times the turning rate, so I × (turning rate) stays the same. When the diver pulls in the arms and legs, I drops, and the turning rate must rise by the same factor. Here a tuck makes the diver turn about four times faster than when stretched. It is the skater pulling in the arms again.</p>
+    <p>The timing decides the dive. The diver has to be at exactly a half turn or a whole turn when the water comes: head first needs a half turn more than a whole number of somersaults, feet first needs a whole number. Stretching out slows the turning, which lets the diver aim the entry, and a straight body makes a small splash. A dive called 3½ somersaults is three and a half turns, in less than two seconds from a 10 m platform. Try the chips, and then change when to pull in and when to stretch out.</p>`);
+}
+
+// ---------- Twist ----------
+
+const TRUNK = { x: 14, y: 14, z: 1.1 };                     // the trunk, legs and head, about the centre of mass
+const MA = 4.5, ARM_CM = 0.42;                              // each arm: mass, and how far its centre of mass is from the shoulder
+const DIRS = { down: [0, 0, -1], up: [0, 0, 1], fwd: [0, 1, 0], back: [0, -1, 0], out: [1, 0, 0] };   // out is mirrored for the left arm
+const PATS = { fb: ['fwd', 'back'], ud: ['up', 'down'], fd: ['fwd', 'down'] };
+const armVec = (side, d) => { const v = DIRS[d]; return [v[0] * side, v[1], v[2]]; };
+const mix = (a, b, s) => a.map((x, i) => x + (b[i] - x) * s);
+function inertia(vr, vl) {
+  const I = [[TRUNK.x, 0, 0], [0, TRUNK.y, 0], [0, 0, TRUNK.z]];
+  [[1, vr], [-1, vl]].forEach(([side, d]) => {
+    const r = [0.2 * side + ARM_CM * d[0], ARM_CM * d[1], 0.5 + ARM_CM * d[2]], r2 = r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) I[i][j] += MA * ((i === j ? r2 : 0) - r[i] * r[j]);
+  });
+  return I;
+}
+function inv3(m) {
+  const [[a, b, c], [d, e, f], [g, h, i]] = m;
+  const A = e * i - f * h, B = -(d * i - f * g), Cc = d * h - e * g, det = a * A + b * B + c * Cc;
+  return [[A / det, -(b * i - c * h) / det, (b * f - c * e) / det], [B / det, (a * i - c * g) / det, -(a * f - c * d) / det], [Cc / det, -(a * h - b * g) / det, (a * e - b * d) / det]];
+}
+const mv = (M, v) => M.map((r) => r[0] * v[0] + r[1] * v[1] + r[2] * v[2]);
+const crs = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const qm = (a, b) => [a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3], a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2], a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1], a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]];
+function qrot(q, v) {
+  const u = { x: q[1], y: q[2], z: q[3] }, t = V3.mul(V3.cross(u, v), 2);
+  return V3.add(V3.add(v, V3.mul(t, q[0])), V3.cross(u, t));
+}
+/** The two arms at time t: [right, left] direction vectors. */
+function armsAt(t) {
+  const { how, pat, hold, arms } = ui.v;
+  const R = (n) => armVec(1, n), Lf = (n) => armVec(-1, n);
+  if (how === 'board') { const s = ease((t - 0.5) / 0.2); return arms === 'out' ? [mix(R('out'), R('down'), s), mix(Lf('out'), Lf('down'), s)] : [R('down'), Lf('down')]; }
+  const [a, b] = PATS[pat], t0 = 0.1, ramp = 0.12;
+  const s = ease((t - t0) / ramp) - ease((t - (t0 + hold)) / ramp);
+  return [mix(R('down'), R(a), s), mix(Lf('down'), Lf(b), s)];
+}
+function twistSim() {
+  const { how, rev2, lz0 } = ui.v, T = 1.7, dt = 0.004;
+  const Lx = -TRUNK.x * rev2 * TAU;                                  // a forward somersault
+  const izz = inertia(armVec(1, 'down'), armVec(-1, 'down'))[2][2];
+  let Lb = [Lx, 0, how === 'board' ? izz * lz0 * TAU : 0], q = [1, 0, 0, 0], twist = 0;
+  const n0 = Math.hypot(...Lb), out = [];
+  for (let t = 0; t <= T + 1e-9; t += dt) {
+    const [vr, vl] = armsAt(t);
+    const w = mv(inv3(inertia(vr, vl)), Lb);
+    out.push({ t, q: q.slice(), w, twist, tilt: Math.asin(clamp(Lb[2] / n0, -1, 1)) / DEG, vr, vl });
+    const dL = crs(w, Lb).map((x) => -x);                          // L is fixed in space, so it turns the other way in the body
+    Lb = Lb.map((x, i) => x + dL[i] * dt);
+    const n1 = Math.hypot(...Lb); Lb = Lb.map((x) => (x * n0) / n1);
+    const dq = qm(q, [0, w[0], w[1], w[2]]); q = q.map((c, i) => c + 0.5 * dq[i] * dt);
+    const l = Math.hypot(...q); q = q.map((c) => c / l);
+    twist += w[2] * dt;
+  }
+  return { kind: 'twist', T, out, end: out[out.length - 1], Lx, key: JSON.stringify(ui.v) };
+}
+const cam = new Spin.Cam3(pens[0], { az: 0.7, el: 0.28, dist: 5.4, fov: 40, min: 3, max: 10 });
+function drawTwist() {
+  if (!model || model.kind !== 'twist' || model.key !== JSON.stringify(ui.v)) model = twistSim();
+  const m = model, t = Math.min(tr.t * 1.0, m.T);
+  if (tr.running && tr.t > m.T + 1) tr.finish();
+  const k = Math.min(m.out.length - 1, Math.round(t / 0.004)), s = m.out[k];
+  pens[0].begin(); cam.begin();
+  const P = (p) => qrot(s.q, { x: p[0], y: p[1], z: p[2] });
+  cam.line([{ x: 0, y: 0, z: -1.6 }, { x: 0, y: 0, z: 1.6 }], 'rgba(255,255,255,0.08)', 1);
+  cam.arrow({ x: 0, y: 0, z: -1.5 }, { x: -1.4, y: 0, z: 0 }, '#ffd54f', 3, 'L (fixed)');
+  const ring = []; for (let j = 0; j <= 40; j++) ring.push({ x: 0, y: 1.25 * Math.cos((j / 40) * TAU), z: 1.25 * Math.sin((j / 40) * TAU) });
+  cam.line(ring, 'rgba(255,213,79,0.15)', 1.2, [3, 5]);
+  cam.line([P([0, 0, 0.58]), P([0, 0, -0.05])], '#e9eef5', 5);                          // trunk
+  cam.line([P([-0.2, 0, 0.5]), P([0.2, 0, 0.5])], '#ff9a3c', 5);                         // shoulders
+  cam.line([P([-0.1, 0, -0.05]), P([0.1, 0, -0.05])], '#4fc3f7', 5);                     // hips
+  for (const sd of [1, -1]) cam.line([P([0.1 * sd, 0, -0.05]), P([0.09 * sd, 0, -0.5]), P([0.09 * sd, 0, -0.95])], '#e9eef5', 4);
+  [[1, s.vr], [-1, s.vl]].forEach(([sd, d]) => cam.line([P([0.2 * sd, 0, 0.5]), P([0.2 * sd + 2 * ARM_CM * d[0], 2 * ARM_CM * d[1], 0.5 + 2 * ARM_CM * d[2]])], sd > 0 ? '#ffb36b' : '#8ed8ff', 4));
+  cam.dot(P([0, 0, 0.78]), '#e9eef5', 11); cam.line([P([0, 0.09, 0.8]), P([0, 0.3, 0.8])], '#fff', 3);   // head, and the face
+  cam.text('face', P([0, 0.36, 0.8]), { size: 10, color: '#fff' });
+  pens[0].note(`Twists so far: ${(s.twist / TAU).toFixed(2)}`);
+
+  const R = pens[1].begin(), h = R.ch / 2 - 4;
+  const win = m.out.slice(0, k + 1), end = m.end;
+  const c1 = R.chart({ x: 4, y: 2, w: R.cw - 8, h }, { x0: 0, x1: m.T, y0: Math.min(0, Math.min(...m.out.map((p) => p.twist / TAU)) - 0.05), y1: Math.max(0.5, Math.max(...m.out.map((p) => p.twist / TAU)) * 1.15), title: 'Twists made so far (turns about the long axis)', xTicks: 6, yTicks: 4, padB: 8, fmtY: (v) => v.toFixed(1) });
+  c1.line(win.map((p) => ({ x: p.t, y: p.twist / TAU })), '#ff9a3c', 3); c1.dot(s.t, s.twist / TAU, '#fff', 5);
+  const lim = Math.max(2, Math.max(...m.out.map((p) => Math.abs(p.tilt))) * 1.2);
+  const c2 = R.chart({ x: 4, y: h + 8, w: R.cw - 8, h }, { x0: 0, x1: m.T, y0: -lim, y1: lim, title: 'Tilt of the long axis away from the plane of the somersault (degrees)', xTicks: 6, yTicks: 4, xTitle: 'time (s)', fmtY: (v) => v.toFixed(0) });
+  c2.hline(0, 'rgba(255,255,255,0.3)', [1, 0]);
+  c2.line(win.map((p) => ({ x: p.t, y: p.tilt })), '#4fc3f7', 3); c2.dot(s.t, s.tilt, '#fff', 5);
+
+  const how = ui.v.how, tw = end.twist / TAU;
+  app.explain(`${nums([['twists by the water', tw.toFixed(2)], ['largest tilt', `${Math.max(...m.out.map((p) => Math.abs(p.tilt))).toFixed(1)}°`], ['somersault turning', `${ui.v.rev2.toFixed(2)} turns a second`], ['twist rate at the end', `${(end.w[2] / TAU).toFixed(2)} turns a second`]])}
+    ${how === 'air' ? `<p><b>A twist from nothing.</b> The diver takes off with no twist, so the angular momentum has no part along the long axis. Yet the diver can start one in the air, with no push on anything. Moving the arms unevenly (one forward, the other back or down) makes the body lopsided. It then turns about a slightly <b>tilted</b> axis, so part of L ends up along the long axis. Look at the second graph: the tilt is only a few degrees. That is enough, because the body is very easy to twist: its moment of inertia about the long axis is about 1 kg m², against about 14 for a somersault. A small part of L along the long axis becomes a fast twist. The arms then return to the sides, and the twist goes on by itself. It is the mechanism of the falling cat.</p>
+    <p>This is a simple model: a stiff trunk with two arms. A real diver also bends at the hips and moves the arms faster, so a real twist is larger than this one.</p>`
+    : `<p><b>A twist from the board.</b> Here the diver gives a twist at take-off, and the angular momentum about the long axis, L along the body, is fixed. The twist rate is that L divided by the moment of inertia about the long axis. With the arms out, this moment of inertia is large, and the twist is slow. Pulling the arms in makes it smaller, so the twist speeds up, as with the skater. Compare the two arm choices. The tilt in the second graph stays small: a twist from the board comes with only a little tilt.</p>`}`);
+}
+
+function draw(now) {
+  tr.step(now);
+  if (ui.v.mode === 'tuck') drawTuck(); else drawTwist();
+}
+setup(); tr.restart();
+Spin.run(draw);
+</script>
+</body>
+</html>

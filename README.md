@@ -108,6 +108,21 @@ connection. The Earth picture on the Coriolis page also needs the page to be ser
   centre of mass), the three classes of lever, the trade of force for distance (the work stays the
   same), and why a push at an angle wastes force (F sin θ).
 
+**The human body**
+
+- `diver`: a diver keeps the angular momentum from take-off. Tuck to turn about four times faster
+  and stretch to slow down (I × ω is fixed), and start a twist in the air with the arms alone (a torque-free
+  body with moving arms, the mechanism of the falling cat), or on the board.
+- `gait`: why the arms swing. Seen from above, both legs push the body round the same way about a
+  vertical axis. The arms cancel it. Walking and running, and arms the wrong way.
+- `throwing`: a chain of four parts from the trunk to the hand, with joint stops and torque pulses.
+  The sequence and its delay give a much faster ball than all the muscles at once, and the reverse order is worse.
+- `balance`: standing as a tall pendulum with a late reflex and a limit on the pressure under the foot (a
+  shove, a slow reflex, a short foot), and the semicircular canals as a fluid ring (why you feel a turn
+  after you stop spinning).
+- `pilots`: the pressure of a column of blood under g-force (grey-out near 5 g, better with a tilted seat and
+  a g-suit), and how large and how slow a spinning station must be to feel comfortable.
+
 ## How it is built
 
 - `shared/spin.js`: the code every explainer uses. A list of the explainers, the top bar, the page

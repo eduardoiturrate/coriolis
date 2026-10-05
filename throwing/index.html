@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Throwing and kicking · Spin</title>
+<meta name="description" content="A throw is a chain of turns from the hips to the hand. Each part is lighter than the last, and each one turns faster, if the timing is right. A simulation of a chain of four parts, with the order and the delays you choose." />
+<meta name="color-scheme" content="dark" />
+<link rel="stylesheet" href="../shared/topbar.css" />
+<link rel="stylesheet" href="../shared/spin.css" />
+</head>
+<body>
+<script src="../shared/spin.js"></script>
+<script>
+const { C, V, nums, TAU, DEG } = Spin;
+
+const app = Spin.app({
+  slug: 'throwing',
+  sub: 'A throw starts with the heavy parts, the hips and the trunk, and ends with the light ones, the forearm and the hand. Each one passes its turning on to the next.',
+  views: [{ caption: 'A throw, seen from above (slowed down)' }, { caption: 'The turning rate of each part, and the speed of the ball' }],
+  go: 'Throw', speed: { min: 0.05, max: 1, value: 0.2, step: 0.05 },
+});
+const { ui, tr, pens } = app;
+
+ui.slider('delay', { label: 'Delay between one part and the next', min: 0, max: 0.25, step: 0.01, value: 0.09, fmt: (v) => (v === 0 ? 'none: all at once' : `${(v * 1000).toFixed(0)} ms`) });
+ui.seg('order', [['fwd', 'Trunk first, hand last'], ['rev', 'Hand first, trunk last']], { label: 'Order of the muscles', value: 'fwd' });
+ui.slider('power', { label: 'Strength of the muscles', min: 60, max: 140, step: 5, value: 100, fmt: (v) => `${v}%` });
+ui.chips([{ text: 'All at once', set: { delay: 0, order: 'fwd' } }, { text: 'In sequence', set: { delay: 0.09, order: 'fwd' } }, { text: 'A sequence that is too slow', set: { delay: 0.25, order: 'fwd' } }, { text: 'Backward order', set: { delay: 0.09, order: 'rev' } }]);
+app.credit('A simple model: four parts in a flat chain, driven by a pulse of muscle torque at each joint, with stops at full stretch. A real overhand throw is mostly in a vertical plane, but the passing of the turning along the chain is the same.');
+ui.on(() => { model = null; tr.restart(); });
+
+// The chain, seen from above. Part 0 is the trunk (it turns about the spine), then the upper arm, the forearm, and the hand with the ball.
+const N = 4;
+const LEN = [0.2, 0.3, 0.28, 0.2], MASS = [0, 2.2, 1.3, 0.8], LC = [0, 0.13, 0.12, 0.1];
+const ICM = [1.4, 2.2 * 0.09 / 12, 1.3 * 0.28 * 0.28 / 12, 0.8 * 0.04 / 12];
+const TAU0 = [150, 70, 30, 6], DUR = [0.22, 0.2, 0.15, 0.1];
+const RMAX = [0, 0.15, 0, 0.1], RMIN = [0, -1.6, -2.4, -1.3];          // joint stops (shoulder, elbow, wrist): nearly straight at most
+const lam = (k, i) => (i < k ? LEN[i] : LC[k]);
+const COEF = (() => { const c = []; for (let i = 0; i < N; i++) { c.push([]); for (let j = 0; j < N; j++) { let s = 0; for (let k = Math.max(i, j); k < N; k++) s += MASS[k] * lam(k, i) * lam(k, j); c[i].push(s); } } return c; })();
+function Mmat(q) { return COEF.map((row, i) => row.map((c, j) => c * Math.cos(q[i] - q[j]) + (i === j ? ICM[i] : 0))); }
+function bias(q, dq) {
+  const h = new Array(N).fill(0);
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) for (let l = 0; l < N; l++) {
+    const dMij = -COEF[i][j] * Math.sin(q[i] - q[j]) * ((i === l ? 1 : 0) - (j === l ? 1 : 0));
+    const dMjl = -COEF[j][l] * Math.sin(q[j] - q[l]) * ((j === i ? 1 : 0) - (l === i ? 1 : 0));
+    h[i] += (dMij - 0.5 * dMjl) * dq[j] * dq[l];
+  }
+  return h;
+}
+function solve(A, b) {
+  const n = b.length, M = A.map((r, i) => [...r, b[i]]);
+  for (let i = 0; i < n; i++) { let p = i; for (let r = i + 1; r < n; r++) if (Math.abs(M[r][i]) > Math.abs(M[p][i])) p = r; [M[i], M[p]] = [M[p], M[i]]; for (let r = i + 1; r < n; r++) { const f = M[r][i] / M[i][i]; for (let c = i; c <= n; c++) M[r][c] -= f * M[i][c]; } }
+  const x = new Array(n); for (let i = n - 1; i >= 0; i--) { let s = M[i][n]; for (let c = i + 1; c < n; c++) s -= M[i][c] * x[c]; x[i] = s / M[i][i]; } return x;
+}
+function simulate(delay, order, power, T = 1.1, dt = 0.0004) {
+  const t0 = [0, 1, 2, 3].map((i) => 0.05 + delay * (order === 'fwd' ? i : 3 - i));
+  const tau0 = TAU0.map((a) => (a * power) / 100);
+  const R0 = [-0.9, -0.5, -1.5, -0.7];                                  // trunk angle, then the angles between the parts: all lagging behind
+  let q = [R0[0]]; for (let i = 1; i < N; i++) q.push(q[i - 1] + R0[i]);
+  let dq = [0, 0, 0, 0];
+  const K = 2500, Cd = 6;
+  const accel = (q, dq, t) => {
+    const tj = tau0.map((a, i) => { const x = (t - t0[i]) / DUR[i]; return x > 0 && x < 1 ? a * Math.sin(Math.PI * x) : 0; });
+    for (let i = 1; i < N; i++) {
+      const r = q[i] - q[i - 1], dr = dq[i] - dq[i - 1];
+      if (r > RMAX[i]) tj[i] += -K * (r - RMAX[i]) - Cd * dr; else if (r < RMIN[i]) tj[i] += -K * (r - RMIN[i]) - Cd * dr;
+    }
+    const Q = tj.map((v, i) => v - (i + 1 < N ? tj[i + 1] : 0)), h = bias(q, dq);
+    return solve(Mmat(q), Q.map((v, i) => v - h[i]));
+  };
+  const out = []; let best = 0, bi = 0, k = 0;
+  for (let t = 0; t < T; t += dt, k++) {
+    const f = (s, tt) => { const a = accel(s.slice(0, N), s.slice(N), tt); return [...s.slice(N), ...a]; };
+    let s = [...q, ...dq];
+    const k1 = f(s, t), k2 = f(s.map((v, i) => v + 0.5 * dt * k1[i]), t + dt / 2), k3 = f(s.map((v, i) => v + 0.5 * dt * k2[i]), t + dt / 2), k4 = f(s.map((v, i) => v + dt * k3[i]), t + dt);
+    s = s.map((v, i) => v + (dt / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i]));
+    q = s.slice(0, N); dq = s.slice(N);
+    if (k % 5 === 0) {
+      let x = 0, y = 0, vx = 0, vy = 0; for (let i = 0; i < N; i++) { x += LEN[i] * Math.cos(q[i]); y += LEN[i] * Math.sin(q[i]); vx += -LEN[i] * Math.sin(q[i]) * dq[i]; vy += LEN[i] * Math.cos(q[i]) * dq[i]; }
+      const sp = Math.hypot(vx, vy);
+      out.push({ t, q: q.slice(), dq: dq.slice(), x, y, vx, vy, sp });
+      if (sp > best) { best = sp; bi = out.length - 1; }
+    }
+  }
+  return { out, best, bi };
+}
+let model = null;
+function build() {
+  const { delay, order, power } = ui.v;
+  const main = simulate(delay, order, power), once = simulate(0, 'fwd', power);
+  model = { ...main, once, key: JSON.stringify(ui.v) };
+}
+const COL = ['#e9eef5', '#ff9a3c', '#ffd54f', '#4fc3f7'], NAME = ['trunk', 'upper arm', 'forearm', 'hand'];
+function draw(now) {
+  tr.step(now);
+  if (!model || model.key !== JSON.stringify(ui.v)) build();
+  const m = model, T = 1.1, t = Math.min(tr.t, T);
+  if (tr.running && tr.t > T + 0.9) tr.finish();
+  const k = Math.min(m.out.length - 1, Math.round(t / 0.002)), s = m.out[k], rel = m.out[m.bi];
+
+  const L = pens[0].begin().box(-1.15, 1.15, -1.0, 1.0, 10);
+  L.circle({ x: 0, y: 0 }, 0.04, { fill: '#9aa7b8' });
+  // the trunk: the line of the shoulders, turning about the spine
+  const sh = { x: LEN[0] * Math.cos(s.q[0]), y: LEN[0] * Math.sin(s.q[0]) };
+  L.line([{ x: -sh.x, y: -sh.y }, sh], COL[0], 7);
+  const pts = [{ x: 0, y: 0 }]; let px = 0, py = 0;
+  for (let i = 0; i < N; i++) { px += LEN[i] * Math.cos(s.q[i]); py += LEN[i] * Math.sin(s.q[i]); pts.push({ x: px, y: py }); }
+  for (let i = 1; i < N; i++) L.line([pts[i], pts[i + 1]], COL[i], 5);
+  for (let i = 1; i < N; i++) L.dot(pts[i], COL[i], 5);
+  const released = k >= m.bi;
+  if (released) {
+    const dtr = s.t - rel.t, b = { x: rel.x + rel.vx * dtr, y: rel.y + rel.vy * dtr };
+    L.line([{ x: rel.x, y: rel.y }, b], 'rgba(255,255,255,0.45)', 2, [4, 5]);
+    L.dot(b, '#fff', 7);
+  } else L.dot(pts[N], '#fff', 7);
+  L.note(released ? `Released at ${m.best.toFixed(1)} m/s` : `Ball speed now: ${s.sp.toFixed(1)} m/s`);
+
+  const R = pens[1].begin(), h = R.ch / 2 - 4;
+  const pk = Math.max(...m.out.map((p) => Math.max(...p.dq.map(Math.abs)))) * 1.08;
+  const c1 = R.chart({ x: 4, y: 2, w: R.cw - 8, h }, { x0: 0, x1: T, y0: -pk * 0.08, y1: pk, title: 'Turning rate of each part (radians a second)', xTicks: 6, yTicks: 4, padB: 8, fmtY: (v) => v.toFixed(0) });
+  for (let i = 0; i < N; i++) { c1.line(m.out.slice(0, k + 1).map((p) => ({ x: p.t, y: p.dq[i] })), COL[i], 2.6); }
+  NAME.forEach((n, i) => c1.text(n, 0.012, pk * (0.95 - 0.09 * i), { size: 10.5, color: COL[i], align: 'left' }));
+  const c2 = R.chart({ x: 4, y: h + 8, w: R.cw - 8, h }, { x0: 0, x1: T, y0: 0, y1: Math.max(36, m.best * 1.15), title: 'Speed of the ball (m/s). Dashed: all at once', xTicks: 6, yTicks: 4, xTitle: 'time (s)', fmtY: (v) => v.toFixed(0) });
+  c2.line(m.once.out.map((p) => ({ x: p.t, y: p.sp })), 'rgba(255,255,255,0.3)', 1.6, [4, 4]);
+  c2.line(m.out.slice(0, k + 1).map((p) => ({ x: p.t, y: p.sp })), '#fff', 3);
+  c2.dot(rel.t, m.best, '#ff9a3c', 5.5); c2.text('release', rel.t, m.best, { dy: -12, align: 'center', size: 10.5, color: '#ff9a3c' });
+  const peaks = [0, 1, 2, 3].map((i) => Math.max(...m.out.map((p) => Math.abs(p.dq[i]))));
+  app.explain(`${nums([['ball speed at release', `${m.best.toFixed(1)} m/s`, `(${(m.best * 3.6).toFixed(0)} km/h)`], ['with all the muscles at once', `${m.once.best.toFixed(1)} m/s`], ['gain from the timing', `${((m.best / m.once.best - 1) * 100).toFixed(0)}%`], ['peak turning: trunk, then hand', `${peaks[0].toFixed(0)} → ${peaks[3].toFixed(0)}`, 'rad/s']])}
+    <p>A throw is a <b>chain</b>. The trunk is the biggest, strongest and heaviest part, and it starts the turn. As it slows, it passes its turning on to the upper arm. That is lighter, so it turns faster. The upper arm then passes it to the forearm, and the forearm to the hand, each one lighter and faster than the one before. It is the skater again: the angular momentum is shared with a smaller moment of inertia, so the turning rate goes up. Look at the first graph: the peaks get higher and later along the chain, from white to blue.</p>
+    <p>The elbow reaches full stretch and stops, so the forearm's turning goes into the hand: this is the crack of a whip. The delay matters. If all the muscles fire at once, they work against each other and the parts have no turning to pass on. If the order is reversed, the hand starts first and the trunk has nothing to give it. The ball ends slower in both cases. With the delay you chose it is ${m.once.best > 0 ? (m.best / m.once.best).toFixed(1) : '–'} times as fast as with everything at once. Too long a delay wastes the chain too: each part has slowed down before the next one starts, so less is passed on. The best delay here is about 0.12 s.</p>
+    <p>The same pattern is in a kick (hip, thigh, shin, foot), a punch, a golf swing, a tennis serve, and a real whip.</p>`);
+}
+Spin.run(draw);
+</script>
+</body>
+</html>
