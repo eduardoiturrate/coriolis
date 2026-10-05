@@ -29,7 +29,7 @@ const is = (m) => (v) => v.mode === m;
 ui.slider('v', { label: 'Speed of the bicycle', min: 0, max: 10, step: 0.1, value: 5, fmt: (v) => `${v.toFixed(1)} m/s (${(v * 3.6).toFixed(0)} km/h)`, show: is('bike') });
 ui.chips([{ text: 'Walking 1.5', set: { v: 1.5 } }, { text: 'Too slow 3', set: { v: 3 } }, { text: 'Just right 5', set: { v: 5 } }, { text: 'Too fast 8', set: { v: 8 } }], { show: is('bike') });
 ui.hint('The bicycle has no rider steering it. It balances only by its own design.', { show: is('bike') });
-ui.seg('size', [['coin', 'A coin (1.2 cm)'], ['disk', 'Euler’s disk (3.8 cm)']], { label: 'Disk', show: is('coin') });
+ui.seg('size', [['coin', 'A coin (radius 1.2 cm)'], ['disk', 'Euler’s disk (radius 3.8 cm)']], { label: 'Disk', show: is('coin') });
 ui.slider('a0', { label: 'Tilt at the start', min: 10, max: 45, step: 1, value: 30, fmt: (v) => `${v}°`, show: is('coin') });
 ui.slider('t0', { label: 'How long it spins', min: 5, max: 40, step: 1, value: 12, fmt: (v) => `${v} s`, show: is('coin') });
 ui.check('warp', 'Slow down toward the end, so you can watch it', true, { show: is('coin') });
@@ -172,21 +172,24 @@ function coinState() {
   const alpha = a0 * DEG * Math.cbrt(frac);
   const omega = Math.sqrt((4 * G) / (a * alpha));
   const omega0 = Math.sqrt((4 * G) / (a * a0 * DEG));
-  return { a, tau, alpha, omega, omega0, t0, p, frac };
+  // After the countdown the coin drops flat in a short shudder, and then it is still.
+  const fall = tr.running || tr.endedAt ? Math.min(1, Math.max(0, (tr.t - PTOT) / 0.7)) : 0;
+  return { a, tau, alpha, omega, omega0, t0, p, frac, fall };
 }
 
 function drawCoin(real) {
   const s = coinState();
-  if (tr.running && tr.t > PTOT * 1.08) tr.finish();
+  if (tr.running && tr.t > PTOT + 0.9) tr.finish();
   // The picture turns at a rate that rises with the real one, but never faster than the screen can show.
-  const vis = Math.min(5, 0.7 * (s.omega / s.omega0));
+  const vis = Math.min(5, 0.7 * (s.omega / s.omega0)) * (1 - s.fall);
   coinPhase += TAU * vis * real;
-  coinSpin = -coinPhase * Math.cos(s.alpha);
+  const alphaD = s.alpha * (1 - s.fall) ** 2;                 // the tilt that is drawn
+  coinSpin = -coinPhase * Math.cos(alphaD);
   const p = pens[0].begin(); cam.begin();
   const ring = []; for (let k = 0; k <= 60; k++) ring.push({ x: 1.6 * Math.cos((k / 60) * TAU), y: 1.6 * Math.sin((k / 60) * TAU), z: 0 });
   cam.line(ring, 'rgba(155,231,166,0.45)', 1.5);
   for (let k = 0; k < 8; k++) cam.line([{ x: 0, y: 0, z: 0 }, { x: 1.6 * Math.cos((k * TAU) / 8), y: 1.6 * Math.sin((k * TAU) / 8), z: 0 }], 'rgba(155,231,166,0.12)', 1);
-  const sa = Math.sin(s.alpha), ca = Math.cos(s.alpha);
+  const sa = Math.sin(alphaD), ca = Math.cos(alphaD);
   const ph = coinPhase;
   const c = { x: 0, y: 0, z: sa };
   const d = { x: ca * Math.cos(ph), y: ca * Math.sin(ph), z: -sa }; // from the center down the slope to the rim at the table
@@ -200,7 +203,7 @@ function drawCoin(real) {
   for (let k = 0; k < 6; k++) cam.line([c, at(coinSpin + (k * TAU) / 6)], k === 0 ? C.ink : 'rgba(255,255,255,0.35)', k === 0 ? 3 : 1.2);
   cam.dot(contact, C.ink, 6);
   cam.dot({ x: 0, y: 0, z: 0.002 }, 'rgba(255,255,255,0.5)', 3);
-  p.note(s.frac < 1e-3 ? 'It whirs faster and faster, then stops with a shudder' : 'The rim rolls around while the middle hardly moves');
+  p.note(s.fall >= 1 ? 'Stopped: the coin lies flat' : s.fall > 0 ? 'It drops flat with a shudder' : s.frac < 1e-3 ? 'It whirs faster and faster, then stops with a shudder' : 'The rim rolls around while the middle hardly moves');
 
   const q = pens[1].begin();
   const w = q.cw - 12, h = q.ch / 2 - 4;
@@ -220,8 +223,8 @@ function drawCoin(real) {
   c2.line(pa.filter((o) => o.x <= xNow), C.friend, 3); c2.dot(xNow, aDeg(s.frac), C.ink, 6);
 
   if (ui.v.sound) tone.set(Math.min(3000, 15 * (s.omega / TAU)), tr.running ? 0.07 : 0); else tone.off();
-  app.explain(`${nums([['time left', timeFmt(xNow)], ['tilt', `${(s.alpha / DEG).toFixed(s.alpha / DEG < 1 ? 2 : 1)}°`], ['whirring', `${(s.omega / TAU).toFixed(1)}`, 'turns a second']])}
-    <p>A spinning coin does not simply slow down. As it loses energy, the angle between it and the table shrinks, and the point where it touches the table circles faster and faster: a rising whirr that ends in a sudden shudder as the coin falls flat. It looks like a countdown. In a simple model the rate would become infinite at a fixed time (a "finite-time singularity"), and in a real coin it is stopped by the last bit of roughness.</p>
+  app.explain(`${nums(s.fall >= 1 ? [['time left', '0'], ['tilt', '0°'], ['whirring', '0', 'turns a second']] : [['time left', timeFmt(xNow)], ['tilt', `${(s.alpha / DEG).toFixed(s.alpha / DEG < 1 ? 2 : 1)}°`], ['whirring', `${(s.omega / TAU).toFixed(1)}`, 'turns a second']])}
+    <p>An <b>Euler’s disk</b> is a toy: a heavy metal disk, about 7.6 cm across, that you spin on a smooth, slightly curved base. It behaves like a coin, but it spins for much longer, so the end is easy to hear and see. A spinning coin does not simply slow down. As it loses energy, the angle between it and the table shrinks, and the point where it touches the table circles faster and faster: a rising whirr that ends in a sudden shudder as the coin falls flat. It looks like a countdown. In a simple model the rate would become infinite at a fixed time (a "finite-time singularity"), and in a real coin it is stopped by the last bit of roughness.</p>
     <p>The straight lines in the log charts show it: the tilt falls as the cube root of the time left, and the whirring rate rises as the sixth root. Time runs left to right on these charts, but the scale is the time that remains, so the last moments take up half of the picture.</p>`);
 }
 
