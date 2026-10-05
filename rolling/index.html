@@ -133,6 +133,7 @@ function draw(now) {
   ])}
     <p>${kind}.</p><p>${contact}</p>
     <p>At every instant, every point of the wheel moves as if the wheel were turning about one fixed center (the cross in the top view). For rolling, that center is the contact point. Each arrow is at right angles to the line from the center, and its length is proportional to the distance from it.</p>
+    <p>The wheel turns at the same rate in both views: 1 radian a second. Only the forward speed depends on who is looking. Every observer who is not turning measures the same turning rate, and one who turns with the wheel would see it stand still. This is why rotation, unlike steady forward motion, can be detected from inside.</p>
     ${r > 1 && vr === 1 ? '<p>The flange of a train wheel sticks out below the rail. At the bottom of each loop that part of the wheel moves <b>backward</b>, while the train goes forward.</p>' : ''}`);
 }
 tr.restart();
